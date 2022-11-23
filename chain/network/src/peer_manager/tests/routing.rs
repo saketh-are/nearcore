@@ -1,4 +1,5 @@
 use crate::broadcast;
+use crate::config;
 use crate::network_protocol::testonly as data;
 use crate::network_protocol::{Edge, Encoding, Ping, RoutedMessageBody, RoutingTableUpdate};
 use crate::peer;
@@ -10,13 +11,37 @@ use crate::store;
 use crate::tcp;
 use crate::testonly::{make_rng, Rng};
 use crate::time;
+use crate::types::PeerInfo;
 use crate::types::PeerMessage;
 use near_o11y::testonly::init_test_logger;
+use near_primitives::network::PeerId;
 use near_store::db::TestDB;
 use pretty_assertions::assert_eq;
 use rand::Rng as _;
 use std::collections::HashSet;
 use std::sync::Arc;
+
+fn make_configs(
+    chain: &data::Chain,
+    rng: &mut Rng,
+    num_nodes: usize,
+    num_boot_nodes: usize,
+) -> Vec<config::NetworkConfig> {
+    let mut cfgs: Vec<_> = (0..num_nodes).map(|_i| chain.make_config(rng)).collect();
+    let boot_nodes: Vec<_> = cfgs[0..num_boot_nodes]
+        .iter()
+        .map(|c| PeerInfo {
+            id: PeerId::new(c.node_key.public_key()),
+            addr: c.node_addr,
+            account_id: None,
+        })
+        .collect();
+    for config in cfgs.iter_mut() {
+        config.outbound_disabled = false;
+        config.peer_store.boot_nodes = boot_nodes.clone();
+    }
+    cfgs
+}
 
 // test routing in a two-node network before and after connecting the nodes
 #[tokio::test]
@@ -41,6 +66,29 @@ async fn simple() {
 
     tracing::info!(target:"test", "connect the nodes");
     pm0.connect_to(&pm1.peer_info()).await;
+
+    tracing::info!(target:"test", "wait for {id0} routing table");
+    pm0.wait_for_routing_table(&mut clock, &[(id1.clone(), vec![id1.clone()])]).await;
+    tracing::info!(target:"test", "wait for {id1} routing table");
+    pm1.wait_for_routing_table(&mut clock, &[(id0.clone(), vec![id0.clone()])]).await;
+}
+
+// test bootstrapping a two-node network with one boot node
+#[tokio::test]
+async fn from_boot_nodes() {
+    init_test_logger();
+    let mut rng = make_rng(921853233);
+    let rng = &mut rng;
+    let mut clock = time::FakeClock::default();
+    let chain = Arc::new(data::Chain::make(&mut clock, rng, 10));
+
+    tracing::info!(target:"test", "start two nodes");
+    let cfgs = make_configs(&chain, rng, 2, 1);
+    let pm0 = start_pm(clock.clock(), TestDB::new(), cfgs[0].clone(), chain.clone()).await;
+    let pm1 = start_pm(clock.clock(), TestDB::new(), cfgs[1].clone(), chain.clone()).await;
+
+    let id0 = pm0.cfg.node_id();
+    let id1 = pm1.cfg.node_id();
 
     tracing::info!(target:"test", "wait for {id0} routing table");
     pm0.wait_for_routing_table(&mut clock, &[(id1.clone(), vec![id1.clone()])]).await;

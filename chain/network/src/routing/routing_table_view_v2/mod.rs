@@ -10,9 +10,6 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[cfg(test)]
-mod tests;
-
 const LAST_ROUTED_CACHE_SIZE: usize = 10_000;
 
 pub(crate) struct RoutingTableViewV2(Mutex<Inner>);

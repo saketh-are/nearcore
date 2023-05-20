@@ -1,7 +1,6 @@
 use crate::network_protocol::PeerIdOrHash;
 use crate::routing;
 use crate::routing::route_back_cache::RouteBackCache;
-use crate::store;
 use lru::LruCache;
 use near_async::time;
 use near_primitives::hash::CryptoHash;
@@ -66,7 +65,7 @@ pub(crate) enum FindRouteError {
 }
 
 impl RoutingTableViewV2 {
-    pub fn new(store: store::Store) -> Self {
+    pub fn new() -> Self {
         Self(Mutex::new(Inner {
             next_hops: Default::default(),
             route_back: RouteBackCache::default(),

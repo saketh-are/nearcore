@@ -2,7 +2,7 @@ use crate::concurrency;
 use crate::concurrency::runtime::Runtime;
 use crate::network_protocol::{Edge, EdgeState};
 use crate::routing::bfs;
-use crate::routing::routing_table_view::RoutingTableView;
+use crate::routing::routing_table_view_v2::RoutingTableViewV2;
 use crate::stats::metrics;
 use crate::store;
 use arc_swap::ArcSwap;
@@ -217,7 +217,7 @@ pub(crate) struct GraphV2 {
     unreliable_peers: ArcSwap<HashSet<PeerId>>,
     // TODO(gprusak): RoutingTableView consists of a bunch of unrelated stateful features.
     // It requires a refactor.
-    pub routing_table: RoutingTableView,
+    pub routing_table: RoutingTableViewV2,
 
     runtime: Runtime,
 }
@@ -225,7 +225,7 @@ pub(crate) struct GraphV2 {
 impl GraphV2 {
     pub fn new(config: GraphConfigV2, store: store::Store) -> Self {
         Self {
-            routing_table: RoutingTableView::new(store.clone()),
+            routing_table: RoutingTableViewV2::new(store.clone()),
             inner: Arc::new(Mutex::new(Inner {
                 graph: bfs::Graph::new(config.node_id.clone()),
                 config,

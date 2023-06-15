@@ -1,5 +1,6 @@
 use crate::network_protocol::Edge;
 use near_primitives::network::PeerId;
+use near_primitives::views::EdgeCacheView;
 use std::collections::hash_map::{Entry, Iter};
 use std::collections::{HashMap, HashSet};
 
@@ -343,5 +344,9 @@ impl EdgeCache {
         } else {
             None
         }
+    }
+
+    pub(crate) fn get_debug_view(&self) -> EdgeCacheView {
+        EdgeCacheView { peer_mapping: self.p2id.clone() }
     }
 }

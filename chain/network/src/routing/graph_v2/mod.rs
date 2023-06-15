@@ -7,6 +7,7 @@ use crate::stats::metrics;
 use arc_swap::ArcSwap;
 use near_async::time;
 use near_primitives::network::PeerId;
+use near_primitives::views::NetworkRoutesView;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
@@ -643,5 +644,9 @@ impl GraphV2 {
             })
             .await
             .unwrap()
+    }
+
+    pub(crate) fn get_debug_view(&self) -> NetworkRoutesView {
+        NetworkRoutesView { edge_cache: self.inner.lock().edge_cache.get_debug_view() }
     }
 }

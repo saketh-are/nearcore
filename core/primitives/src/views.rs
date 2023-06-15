@@ -458,6 +458,16 @@ pub struct NetworkGraphView {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+pub struct EdgeCacheView {
+    pub peer_mapping: HashMap<PeerId, u32>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+pub struct NetworkRoutesView {
+    pub edge_cache: EdgeCacheView,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub struct ShardSyncDownloadView {
     pub downloads: Vec<DownloadStatusView>,
     pub status: String,

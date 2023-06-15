@@ -1109,6 +1109,7 @@ impl actix::Handler<GetDebugStatus> for PeerManagerActor {
                         .collect::<Vec<_>>(),
                 })
             }
+            GetDebugStatus::Routes => DebugStatus::Routes(self.state.graph_v2.get_debug_view()),
         }
     }
 }

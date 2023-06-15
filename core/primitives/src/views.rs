@@ -471,8 +471,17 @@ pub struct EdgeCacheView {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+pub struct PeerRoutesView {
+    pub distance: Vec<i32>,
+    pub min_nonce: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub struct NetworkRoutesView {
     pub edge_cache: EdgeCacheView,
+    pub local_edges: HashMap<PeerId, EdgeView>,
+    pub peer_routes: HashMap<PeerId, PeerRoutesView>,
+    pub my_distances: HashMap<PeerId, u32>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]

@@ -21,12 +21,14 @@ export const RoutingTableView = ({ addr }: RoutingTableViewProps) => {
     }
 
     const routingInfo = routingTable!.status_response.Routes;
+
     const peerLabels = routingInfo.edge_cache.peer_labels;
 
-    const peers = Object.entries(routingInfo.my_distances).map( ([peer_id, distance]) => {
-        return [peer_id, peerLabels[peer_id], distance];
-    });
-    peers.sort((a, b) => a[1] > b[1] ? 1 : -1);
+    const routable_peers = Object.keys(routingInfo.my_distances);
+    routable_peers.sort((a, b) => peerLabels[a] > peerLabels[b] ? 1 : -1);
+
+    const direct_peers = Object.keys(routingInfo.local_edges);
+    direct_peers.sort((a, b) => peerLabels[a] > peerLabels[b] ? 1 : -1);
 
     return (
         <div className="routing-table-view">
@@ -38,12 +40,34 @@ export const RoutingTableView = ({ addr }: RoutingTableViewProps) => {
                     <th>Shortest Path Length (Hops)</th>
                 </thead>
                 <tbody>
-                    {peers.map(([peer_id, peer_label, distance]) => {
+                    {routable_peers.map((peer_id) => {
+                        const peer_label = peerLabels[peer_id];
                         return (
                             <tr key={peer_label}>
-                                <td>{peer_id}</td>
+                                <td>{peer_id.substring(8, 14)}...</td>
                                 <td>{peer_label}</td>
-                                <td>{distance}</td>
+                                <td>{routingInfo.my_distances[peer_id]}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+            <br/>
+            <p><b>Direct Peers</b></p>
+            <table>
+                <thead>
+                    <th>Peer ID</th>
+                    <th>Peer Label</th>
+                    <th>Advertised Distances</th>
+                </thead>
+                <tbody>
+                    {direct_peers.map((peer_id) => {
+                        const peer_label = peerLabels[peer_id];
+                        return (
+                            <tr key={peer_label}>
+                                <td>{peer_id.substring(8, 14)}...</td>
+                                <td>{peer_label}</td>
+                                <td>{routingInfo.peer_routes[peer_id].distance.join(', ')}</td>
                             </tr>
                         );
                     })}

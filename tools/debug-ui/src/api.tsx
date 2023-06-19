@@ -306,7 +306,7 @@ export interface LabeledEdgeView {
 };
 
 export interface EdgeCacheView {
-    peer_labels: { peer_id: number };
+    peer_labels: { [peer_id: string]: number };
     spanning_trees: { [peer_label: number]: LabeledEdgeView[] };
 }
 
@@ -317,9 +317,9 @@ export interface PeerRoutesView {
 
 export interface RoutingTableView {
     edge_cache: EdgeCacheView;
-    local_edges: { peer_id: EdgeView };
-    peer_routes: { peer_id: PeerRoutesView };
-    my_distances: { peer_id: number };
+    local_edges: { [peer_id: string]: EdgeView };
+    peer_routes: { [peer_id: string]: PeerRoutesView };
+    my_distances: { [peer_id: string]:  number };
 }
 
 export interface RoutingTableResponse {

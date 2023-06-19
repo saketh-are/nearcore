@@ -293,6 +293,41 @@ export interface RecentOutboundConnectionsResponse {
     };
 }
 
+export interface EdgeView {
+    peer0: string;
+    peer1: string;
+    nonce: number;
+};
+
+export interface LabeledEdgeView {
+    peer0: number;
+    peer1: number;
+    nonce: number;
+};
+
+export interface EdgeCacheView {
+    peer_labels: { peer_id: number };
+    spanning_trees: { [peer_label: number]: LabeledEdgeView[] };
+}
+
+export interface PeerRoutesView {
+    distance: number[];
+    min_nonce: number;
+}
+
+export interface RoutingTableView {
+    edge_cache: EdgeCacheView;
+    local_edges: { peer_id: EdgeView };
+    peer_routes: { peer_id: PeerRoutesView };
+    my_distances: { peer_id: number };
+}
+
+export interface RoutingTableResponse {
+    status_response: {
+        Routes: RoutingTableView;
+    };
+}
+
 export type DroppedReason = 'HeightProcessed' | 'TooManyProcessingBlocks';
 
 export type BlockProcessingStatus =
@@ -394,6 +429,13 @@ export async function fetchRecentOutboundConnections(
     addr: string
 ): Promise<RecentOutboundConnectionsResponse> {
     const response = await fetch(`http://${addr}/debug/api/recent_outbound_connections`);
+    return await response.json();
+}
+
+export async function fetchRoutingTable(
+    addr: string
+): Promise<RoutingTableResponse> {
+    const response = await fetch(`http://${addr}/debug/api/network_routes`);
     return await response.json();
 }
 

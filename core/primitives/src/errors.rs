@@ -5,7 +5,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use near_crypto::PublicKey;
 use near_primitives_core::types::ProtocolVersion;
 use near_rpc_error_macro::RpcError;
-use near_vm_errors::FunctionCallErrorSer;
+use near_vm_logic::errors::FunctionCallErrorSer;
 use std::fmt::{Debug, Display};
 
 /// Error returned in the ExecutionOutcome in case of failure
@@ -77,13 +77,19 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// Internal
+/// Errors which may occur during working with trie storages, storing
+/// trie values (trie nodes and state values) by their hashes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageError {
     /// Key-value db internal failure
     StorageInternalError,
-    /// Storage is PartialStorage and requested a missing trie node
-    TrieNodeMissing,
+    /// Requested trie value by its hash which is missing in storage.
+    /// TODO (#8997): consider including hash of trie node.
+    MissingTrieValue,
+    /// Found trie node which shouldn't be part of state. Raised during
+    /// validation of state sync parts where incorrect node was passed.
+    /// TODO (#8997): consider including hash of trie node.
+    UnexpectedTrieValue,
     /// Either invalid state or key-value db is corrupted.
     /// For PartialStorage it cannot be corrupted.
     /// Error message is unreliable and for debugging purposes only. It's also probably ok to

@@ -3,7 +3,7 @@
 use near_primitives::contract::ContractCode;
 use near_primitives::runtime::fees::RuntimeFeesConfig;
 use near_primitives::version::PROTOCOL_VERSION;
-use near_vm_errors::FunctionCallError;
+use near_vm_logic::errors::FunctionCallError;
 use near_vm_logic::mocks::mock_external::MockedExternal;
 use near_vm_logic::{VMConfig, VMOutcome};
 use near_vm_runner::internal::VMKind;
@@ -21,7 +21,7 @@ fn run_fuzz(code: &ContractCode, vm_kind: VMKind) -> VMOutcome {
     let mut context = create_context(vec![]);
     context.prepaid_gas = 10u64.pow(14);
     let mut config = VMConfig::test();
-    config.limit_config.wasmer2_stack_limit = i32::MAX; // If we can crash wasmer2 even without the secondary stack limit it's still good to know
+    config.limit_config.contract_prepare_version = near_vm_logic::ContractPrepareVersion::V2;
     let fees = RuntimeFeesConfig::test();
 
     let promise_results = vec![];

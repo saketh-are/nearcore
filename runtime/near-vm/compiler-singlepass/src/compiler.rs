@@ -17,7 +17,6 @@ use near_vm_types::{
     FunctionIndex, FunctionType, LocalFunctionIndex, MemoryIndex, ModuleInfo, TableIndex,
 };
 use near_vm_vm::{TrapCode, VMOffsets};
-#[cfg(feature = "rayon")]
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::Arc;
 
@@ -47,7 +46,6 @@ impl Compiler for SinglepassCompiler {
         &self,
         target: &Target,
         compile_info: &CompileModuleInfo,
-        module_translation: &ModuleTranslationState,
         function_body_inputs: PrimaryMap<LocalFunctionIndex, FunctionBodyData<'_>>,
         tunables: &dyn near_vm_vm::Tunables,
         instrumentation: &finite_wasm::AnalysisOutcome,
@@ -83,19 +81,24 @@ impl Compiler for SinglepassCompiler {
             })?
             .bytes();
         let vmoffsets = VMOffsets::new(pointer_width).with_module_info(&module);
+        let make_assembler = || {
+            const KB: usize = 1024;
+            dynasmrt::VecAssembler::new_with_capacity(0, 128 * KB, 0, 0, KB, 0, KB)
+        };
         let import_idxs = 0..module.import_counts.functions as usize;
         let import_trampolines: PrimaryMap<SectionIndex, _> =
             tracing::info_span!("import_trampolines", n_imports = import_idxs.len()).in_scope(
                 || {
                     import_idxs
-                        .into_par_iter_if_rayon()
-                        .map(|i| {
+                        .into_par_iter()
+                        .map_init(make_assembler, |assembler, i| {
                             let i = FunctionIndex::new(i);
                             gen_import_call_trampoline(
                                 &vmoffsets,
                                 i,
                                 &module.signatures[module.functions[i]],
                                 calling_convention,
+                                assembler,
                             )
                         })
                         .collect::<Vec<_>>()
@@ -106,8 +109,8 @@ impl Compiler for SinglepassCompiler {
         let functions = function_body_inputs
             .iter()
             .collect::<Vec<(LocalFunctionIndex, &FunctionBodyData<'_>)>>()
-            .into_par_iter_if_rayon()
-            .map(|(i, input)| {
+            .into_par_iter()
+            .map_init(make_assembler, |assembler, (i, input)| {
                 tracing::info_span!("function", i = i.index()).in_scope(|| {
                     let reader =
                         near_vm_compiler::FunctionReader::new(input.module_offset, input.data);
@@ -121,8 +124,8 @@ impl Compiler for SinglepassCompiler {
                             ))
                         })?;
                     let mut generator = FuncGen::new(
+                        assembler,
                         module,
-                        module_translation,
                         &self.config,
                         &target,
                         &vmoffsets,
@@ -170,8 +173,10 @@ impl Compiler for SinglepassCompiler {
                     .signatures
                     .values()
                     .collect::<Vec<_>>()
-                    .into_par_iter_if_rayon()
-                    .map(|func_type| gen_std_trampoline(&func_type, calling_convention))
+                    .into_par_iter()
+                    .map_init(make_assembler, |assembler, func_type| {
+                        gen_std_trampoline(&func_type, calling_convention, assembler)
+                    })
                     .collect::<Vec<_>>()
                     .into_iter()
                     .collect::<PrimaryMap<_, _>>()
@@ -182,12 +187,13 @@ impl Compiler for SinglepassCompiler {
                 module
                     .imported_function_types()
                     .collect::<Vec<_>>()
-                    .into_par_iter_if_rayon()
-                    .map(|func_type| {
+                    .into_par_iter()
+                    .map_init(make_assembler, |assembler, func_type| {
                         gen_std_dynamic_import_trampoline(
                             &vmoffsets,
                             &func_type,
                             calling_convention,
+                            assembler,
                         )
                     })
                     .collect::<Vec<_>>()
@@ -220,27 +226,6 @@ fn to_compile_error<T: ToCompileError>(x: T) -> CompileError {
     x.to_compile_error()
 }
 
-trait IntoParIterIfRayon {
-    type Output;
-    fn into_par_iter_if_rayon(self) -> Self::Output;
-}
-
-#[cfg(feature = "rayon")]
-impl<T: IntoParallelIterator + IntoIterator> IntoParIterIfRayon for T {
-    type Output = <T as IntoParallelIterator>::Iter;
-    fn into_par_iter_if_rayon(self) -> Self::Output {
-        return self.into_par_iter();
-    }
-}
-
-#[cfg(not(feature = "rayon"))]
-impl<T: IntoIterator> IntoParIterIfRayon for T {
-    type Output = <T as IntoIterator>::IntoIter;
-    fn into_par_iter_if_rayon(self) -> Self::Output {
-        return self.into_iter();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,7 +236,6 @@ mod tests {
 
     fn dummy_compilation_ingredients<'a>() -> (
         CompileModuleInfo,
-        ModuleTranslationState,
         PrimaryMap<LocalFunctionIndex, FunctionBodyData<'a>>,
         finite_wasm::AnalysisOutcome,
     ) {
@@ -261,7 +245,6 @@ mod tests {
             memory_styles: PrimaryMap::<MemoryIndex, MemoryStyle>::new(),
             table_styles: PrimaryMap::<TableIndex, TableStyle>::new(),
         };
-        let module_translation = ModuleTranslationState::new();
         let function_body_inputs = PrimaryMap::<LocalFunctionIndex, FunctionBodyData<'_>>::new();
         let analysis = finite_wasm::AnalysisOutcome {
             function_frame_sizes: Vec::new(),
@@ -270,29 +253,19 @@ mod tests {
             gas_costs: Vec::new(),
             gas_kinds: Vec::new(),
         };
-        (compile_info, module_translation, function_body_inputs, analysis)
+        (compile_info, function_body_inputs, analysis)
     }
 
     #[test]
     fn errors_for_unsupported_targets() {
         let compiler = SinglepassCompiler::new(Singlepass::default());
 
-        // Compile for win64
-        /*let win64 = Target::new(triple!("x86_64-pc-windows-msvc"), CpuFeature::for_host());
-        let (mut info, translation, inputs) = dummy_compilation_ingredients();
-        let result = compiler.compile_module(&win64, &mut info, &translation, inputs);
-        match result.unwrap_err() {
-            CompileError::UnsupportedTarget(name) => assert_eq!(name, "windows"),
-            error => panic!("Unexpected error: {:?}", error),
-        };*/
-
         // Compile for 32bit Linux
         let linux32 = Target::new(triple!("i686-unknown-linux-gnu"), CpuFeature::for_host());
-        let (mut info, translation, inputs, analysis) = dummy_compilation_ingredients();
+        let (mut info, inputs, analysis) = dummy_compilation_ingredients();
         let result = compiler.compile_module(
             &linux32,
             &mut info,
-            &translation,
             inputs,
             &near_vm_vm::TestTunables,
             &analysis,
@@ -304,11 +277,10 @@ mod tests {
 
         // Compile for win32
         let win32 = Target::new(triple!("i686-pc-windows-gnu"), CpuFeature::for_host());
-        let (mut info, translation, inputs, analysis) = dummy_compilation_ingredients();
+        let (mut info, inputs, analysis) = dummy_compilation_ingredients();
         let result = compiler.compile_module(
             &win32,
             &mut info,
-            &translation,
             inputs,
             &near_vm_vm::TestTunables,
             &analysis,

@@ -1,11 +1,15 @@
 use crate::flat::{FlatStateChanges, FlatStorageChunkView};
 pub use crate::trie::config::TrieConfig;
-pub(crate) use crate::trie::config::DEFAULT_SHARD_CACHE_TOTAL_SIZE_LIMIT;
+pub(crate) use crate::trie::config::{
+    DEFAULT_SHARD_CACHE_DELETIONS_QUEUE_CAPACITY, DEFAULT_SHARD_CACHE_TOTAL_SIZE_LIMIT,
+};
 use crate::trie::insert_delete::NodesStorage;
 use crate::trie::iterator::TrieIterator;
 pub use crate::trie::nibble_slice::NibbleSlice;
 pub use crate::trie::prefetching_trie_storage::{PrefetchApi, PrefetchError};
-pub use crate::trie::shard_tries::{KeyForStateChanges, ShardTries, WrappedTrieChanges};
+pub use crate::trie::shard_tries::{
+    KeyForStateChanges, ShardTries, StateSnapshot, StateSnapshotConfig, WrappedTrieChanges,
+};
 pub use crate::trie::trie_storage::{TrieCache, TrieCachingStorage, TrieDBStorage, TrieStorage};
 use crate::trie::trie_storage::{TrieMemoryPartialStorage, TrieRecordingStorage};
 use crate::StorageError;
@@ -28,6 +32,7 @@ use std::rc::Rc;
 use std::str;
 
 mod config;
+mod from_flat;
 mod insert_delete;
 pub mod iterator;
 mod nibble_slice;
@@ -40,6 +45,8 @@ mod trie_storage;
 #[cfg(test)]
 mod trie_tests;
 pub mod update;
+
+pub use from_flat::construct_trie_from_flat;
 
 const POISONED_LOCK_ERR: &str = "The lock was poisoned.";
 
@@ -446,10 +453,7 @@ impl Trie {
     pub fn from_recorded_storage(partial_storage: PartialStorage, root: StateRoot) -> Self {
         let PartialState::TrieValues(nodes) = partial_storage.nodes;
         let recorded_storage = nodes.into_iter().map(|value| (hash(&value), value)).collect();
-        let storage = Rc::new(TrieMemoryPartialStorage {
-            recorded_storage,
-            visited_nodes: Default::default(),
-        });
+        let storage = Rc::new(TrieMemoryPartialStorage::new(recorded_storage));
         Self::new(storage, root, None)
     }
 
@@ -880,7 +884,17 @@ impl Trie {
         &'a self,
         max_depth: usize,
     ) -> Result<TrieIterator<'a>, StorageError> {
-        TrieIterator::new(self, Some(max_depth))
+        TrieIterator::new(
+            self,
+            Some(Box::new(move |key_nibbles: &Vec<u8>| key_nibbles.len() > max_depth)),
+        )
+    }
+
+    pub fn iter_with_prune_condition<'a>(
+        &'a self,
+        prune_condition: Option<Box<dyn Fn(&Vec<u8>) -> bool>>,
+    ) -> Result<TrieIterator<'a>, StorageError> {
+        TrieIterator::new(self, prune_condition)
     }
 
     pub fn get_trie_nodes_count(&self) -> TrieNodesCount {
@@ -1262,7 +1276,7 @@ mod tests {
 
         assert_eq!(trie3.get(b"dog"), Ok(Some(b"puppy".to_vec())));
         assert_eq!(trie3.get(b"horse"), Ok(Some(b"stallion".to_vec())));
-        assert_eq!(trie3.get(b"doge"), Err(StorageError::TrieNodeMissing));
+        assert_eq!(trie3.get(b"doge"), Err(StorageError::MissingTrieValue));
     }
 
     #[test]

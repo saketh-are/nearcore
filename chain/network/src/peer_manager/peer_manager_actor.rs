@@ -614,7 +614,7 @@ impl PeerManagerActor {
         // Find peers that are not reliable (too much behind) - and make sure that we're not routing messages through them.
         let unreliable_peers = self.unreliable_peers();
         metrics::PEER_UNRELIABLE.set(unreliable_peers.len() as i64);
-        self.state.graph.set_unreliable_peers(unreliable_peers);
+        self.state.set_unreliable_peers(unreliable_peers);
 
         let new_interval = min(max_interval, interval * EXPONENTIAL_BACKOFF_RATIO);
 
@@ -703,9 +703,8 @@ impl PeerManagerActor {
                 .sum(),
             known_producers: self
                 .state
-                .graph
-                .routing_table
-                .get_announce_accounts()
+                .account_announcements
+                .get_announcements()
                 .into_iter()
                 .map(|announce_account| KnownProducer {
                     account_id: announce_account.account_id,
@@ -1091,6 +1090,7 @@ impl actix::Handler<GetDebugStatus> for PeerManagerActor {
                         EdgeView { peer0: key.0.clone(), peer1: key.1.clone(), nonce: edge.nonce() }
                     })
                     .collect(),
+                next_hops: (*self.state.graph.routing_table.info().next_hops).clone(),
             }),
             GetDebugStatus::RecentOutboundConnections => {
                 DebugStatus::RecentOutboundConnections(RecentOutboundConnectionsView {

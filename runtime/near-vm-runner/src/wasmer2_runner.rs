@@ -1,20 +1,22 @@
 use crate::errors::ContractPrecompilatonResult;
 use crate::imports::wasmer2::Wasmer2Imports;
 use crate::internal::VMKind;
-use crate::prepare::{self, WASM_FEATURES};
+use crate::prepare;
 use crate::runner::VMResult;
 use crate::{get_contract_cache_key, imports};
 use memoffset::offset_of;
-use near_primitives::contract::ContractCode;
-use near_primitives::runtime::fees::RuntimeFeesConfig;
-use near_primitives::types::{CompiledContract, CompiledContractCache};
+use near_primitives_core::contract::ContractCode;
+use near_primitives_core::runtime::fees::RuntimeFeesConfig;
 use near_stable_hasher::StableHasher;
-use near_vm_errors::{
+use near_vm_logic::errors::{
     CacheError, CompilationError, FunctionCallError, MethodResolveError, VMRunnerError, WasmTrap,
 };
 use near_vm_logic::gas_counter::FastGasCounter;
 use near_vm_logic::types::{PromiseResult, ProtocolVersion};
-use near_vm_logic::{External, MemSlice, MemoryLike, VMConfig, VMContext, VMLogic, VMOutcome};
+use near_vm_logic::{
+    CompiledContract, CompiledContractCache, External, MemSlice, MemoryLike, VMConfig, VMContext,
+    VMLogic, VMOutcome,
+};
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
@@ -24,22 +26,9 @@ use wasmer_engine::{Engine, Executable};
 use wasmer_engine_universal::{
     Universal, UniversalEngine, UniversalExecutable, UniversalExecutableRef,
 };
-use wasmer_types::{Features, FunctionIndex, InstanceConfig, MemoryType, Pages, WASM_PAGE_SIZE};
+use wasmer_types::{FunctionIndex, InstanceConfig, MemoryType, Pages, WASM_PAGE_SIZE};
 use wasmer_vm::{
     Artifact, Instantiatable, LinearMemory, LinearTable, Memory, MemoryStyle, TrapCode, VMMemory,
-};
-
-const WASMER_FEATURES: Features = Features {
-    threads: WASM_FEATURES.threads,
-    reference_types: WASM_FEATURES.reference_types,
-    simd: WASM_FEATURES.simd,
-    bulk_memory: WASM_FEATURES.bulk_memory,
-    multi_value: WASM_FEATURES.multi_value,
-    tail_call: WASM_FEATURES.tail_call,
-    module_linking: WASM_FEATURES.module_linking,
-    multi_memory: WASM_FEATURES.multi_memory,
-    memory64: WASM_FEATURES.memory64,
-    exceptions: WASM_FEATURES.exceptions,
 };
 
 #[derive(Clone)]
@@ -164,7 +153,7 @@ fn translate_runtime_error(
 ) -> Result<FunctionCallError, VMRunnerError> {
     // Errors produced by host function calls also become `RuntimeError`s that wrap a dynamic
     // instance of `VMLogicError` internally. See the implementation of `Wasmer2Imports`.
-    let error = match error.downcast::<near_vm_errors::VMLogicError>() {
+    let error = match error.downcast::<near_vm_logic::VMLogicError>() {
         Ok(vm_logic) => {
             return vm_logic.try_into();
         }
@@ -233,7 +222,7 @@ impl Wasmer2Config {
 //  major version << 6
 //  minor version
 const WASMER2_CONFIG: Wasmer2Config = Wasmer2Config {
-    seed: (1 << 10) | (10 << 6) | 0,
+    seed: (1 << 10) | (11 << 6) | 0,
     engine: WasmerEngine::Universal,
     compiler: WasmerCompiler::Singlepass,
 };
@@ -256,9 +245,11 @@ impl Wasmer2VM {
         let compiler = Singlepass::new();
         // We only support universal engine at the moment.
         assert_eq!(WASMER2_CONFIG.engine, WasmerEngine::Universal);
+        let features =
+            crate::features::WasmFeatures::from(config.limit_config.contract_prepare_version);
         Self {
             config,
-            engine: Universal::new(compiler).target(target).features(WASMER_FEATURES).engine(),
+            engine: Universal::new(compiler).target(target).features(features.into()).engine(),
         }
     }
 
@@ -402,7 +393,7 @@ impl Wasmer2VM {
         return {
             static MEM_CACHE: once_cell::sync::Lazy<
                 near_cache::SyncLruCache<
-                    near_primitives::hash::CryptoHash,
+                    near_primitives_core::hash::CryptoHash,
                     Result<VMArtifact, CompilationError>,
                 >,
             > = once_cell::sync::Lazy::new(|| {
@@ -660,8 +651,10 @@ impl crate::runner::VM for Wasmer2VM {
         &self,
         code: &ContractCode,
         cache: &dyn CompiledContractCache,
-    ) -> Result<Result<ContractPrecompilatonResult, CompilationError>, near_vm_errors::CacheError>
-    {
+    ) -> Result<
+        Result<ContractPrecompilatonResult, CompilationError>,
+        near_vm_logic::errors::CacheError,
+    > {
         Ok(self
             .compile_and_cache(code, Some(cache))?
             .map(|_| ContractPrecompilatonResult::ContractCompiled))

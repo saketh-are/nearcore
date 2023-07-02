@@ -1,9 +1,12 @@
 [package]
 name = "integration-tests"
-version = "0.0.0"
+version.workspace = true
 authors.workspace = true
-publish = false
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
 
 [dependencies]
 actix-rt.workspace = true
@@ -50,7 +53,7 @@ near-telemetry.workspace = true
 near-test-contracts.workspace = true
 near-performance-metrics.workspace = true
 near-undo-block.workspace = true
-near-vm-errors.workspace = true
+near-vm-logic.workspace = true
 near-vm-runner.workspace = true
 nearcore.workspace = true
 node-runtime.workspace = true

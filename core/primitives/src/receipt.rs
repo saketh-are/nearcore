@@ -1,13 +1,17 @@
 use crate::borsh::maybestd::collections::HashMap;
 use crate::hash::CryptoHash;
-use crate::serialize::{dec_format, option_base64_format};
+use crate::serialize::dec_format;
 use crate::transaction::{Action, TransferAction};
 use crate::types::{AccountId, Balance, ShardId};
 use borsh::{BorshDeserialize, BorshSerialize};
 use near_crypto::{KeyType, PublicKey};
 use near_fmt::AbbrBytes;
+use serde_with::base64::Base64;
+use serde_with::serde_as;
 use std::borrow::Borrow;
 use std::fmt;
+
+pub use near_vm_logic::DataReceiver;
 
 /// Receipts are used for a cross-shard communication.
 /// Receipts could be 2 types (determined by a `ReceiptEnum`): `ReceiptEnum::Action` of `ReceiptEnum::Data`.
@@ -142,6 +146,7 @@ pub struct ActionReceipt {
 
 /// An incoming (ingress) `DataReceipt` which is going to a Receipt's `receiver` input_data_ids
 /// Which will be converted to `PromiseResult::Successful(value)` or `PromiseResult::Failed`
+#[serde_as]
 #[derive(
     BorshSerialize,
     BorshDeserialize,
@@ -154,7 +159,7 @@ pub struct ActionReceipt {
 )]
 pub struct DataReceipt {
     pub data_id: CryptoHash,
-    #[serde(with = "option_base64_format")]
+    #[serde_as(as = "Option<Base64>")]
     pub data: Option<Vec<u8>>,
 }
 
@@ -165,24 +170,6 @@ impl fmt::Debug for DataReceipt {
             .field("data", &format_args!("{}", AbbrBytes(self.data.as_deref())))
             .finish()
     }
-}
-
-/// The outgoing (egress) data which will be transformed
-/// to a `DataReceipt` to be sent to a `receipt.receiver`
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Hash,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct DataReceiver {
-    pub data_id: CryptoHash,
-    pub receiver_id: AccountId,
 }
 
 /// A temporary data which is created by processing of DataReceipt
@@ -209,6 +196,12 @@ pub struct DelayedReceiptIndices {
     pub first_index: u64,
     // Exclusive end index of the queue
     pub next_available_index: u64,
+}
+
+impl DelayedReceiptIndices {
+    pub fn len(&self) -> u64 {
+        self.next_available_index - self.first_index
+    }
 }
 
 /// Map of shard to list of receipts to send to it.

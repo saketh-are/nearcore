@@ -1,24 +1,21 @@
 [package]
 name = "near-vm-runner"
-version = "0.0.0"
+version.workspace = true
 authors.workspace = true
-publish = true
-# Please update rust-toolchain.toml as well when changing version here:
-rust-version.workspace = true
 edition.workspace = true
-license = "MIT OR Apache-2.0"
-readme = "README.md"
+rust-version.workspace = true
+description = "This crate implements the specification of the interface that Near blockchain exposes to the smart contracts."
+repository.workspace = true
+license.workspace = true
 categories = ["wasm"]
-repository = "https://github.com/near/nearcore"
-description = """
-This crate implements the specification of the interface that Near blockchain exposes to the smart contracts.
-"""
+publish = true
 
 [dependencies]
 anyhow = { workspace = true, optional = true }
 borsh.workspace = true
 clap = { workspace = true, optional = true }
 finite-wasm = { workspace = true, features = ["instrument"] }
+wasm-encoder.workspace = true
 loupe.workspace = true
 memoffset.workspace = true
 once_cell.workspace = true
@@ -31,8 +28,7 @@ wasmtime = { workspace = true, optional = true }
 
 near-cache.workspace = true
 near-vm-logic.workspace = true
-near-vm-errors.workspace = true
-near-primitives.workspace = true
+near-primitives-core.workspace = true
 near-stable-hasher.workspace = true
 
 # Old versions of pwasm-utils we need to preserve backwards compatibility under
@@ -42,7 +38,7 @@ parity-wasm_41.workspace = true
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 wasmer-runtime = { workspace = true, optional = true }
-wasmer-runtime-core = { workspace = true, optional = true}
+wasmer-runtime-core = { workspace = true, optional = true }
 wasmer-compiler = { workspace = true, optional = true }
 wasmer-compiler-singlepass = { workspace = true, optional = true }
 wasmer-engine = { workspace = true, optional = true }
@@ -52,7 +48,6 @@ wasmer-vm = { workspace = true, optional = true }
 near-vm-compiler = { workspace = true, optional = true }
 near-vm-compiler-singlepass = { workspace = true, optional = true }
 near-vm-engine = { workspace = true, optional = true }
-near-vm-engine-universal = { workspace = true, features = ["compiler"], optional = true }
 near-vm-types = { workspace = true, optional = true }
 near-vm-vm = { workspace = true, optional = true }
 
@@ -62,7 +57,7 @@ assert_matches.workspace = true
 bolero.workspace = true
 expect-test.workspace = true
 hex.workspace = true
-near-primitives-core.workspace = true
+near-primitives.workspace = true
 near-test-contracts.workspace = true
 rand.workspace = true
 wasm-smith.workspace = true
@@ -91,7 +86,6 @@ near_vm = [
     "near-vm-compiler",
     "near-vm-compiler-singlepass",
     "near-vm-engine",
-    "near-vm-engine-universal",
     "near-vm-types",
     "near-vm-vm"
 ]
@@ -107,12 +101,12 @@ no_cpu_compatibility_checks = []
 no_cache = []
 
 protocol_feature_fix_contract_loading_cost = [
-    "near-primitives/protocol_feature_fix_contract_loading_cost",
+    "near-primitives-core/protocol_feature_fix_contract_loading_cost",
     "near-vm-logic/protocol_feature_fix_contract_loading_cost",
 ]
 
 nightly = [
-    "near-primitives/nightly",
+    "near-primitives-core/nightly",
     "protocol_feature_fix_contract_loading_cost",
 ]
 sandbox = ["near-vm-logic/sandbox"]

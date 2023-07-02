@@ -1,26 +1,27 @@
 use crate::errors::ContractPrecompilatonResult;
 use crate::imports::near_vm::NearVmImports;
 use crate::internal::VMKind;
-use crate::prepare::{self, WASM_FEATURES};
+use crate::prepare;
 use crate::runner::VMResult;
 use crate::{get_contract_cache_key, imports};
 use memoffset::offset_of;
-use near_primitives::contract::ContractCode;
-use near_primitives::runtime::fees::RuntimeFeesConfig;
-use near_primitives::types::{CompiledContract, CompiledContractCache};
+use near_primitives_core::contract::ContractCode;
+use near_primitives_core::runtime::fees::RuntimeFeesConfig;
 use near_stable_hasher::StableHasher;
 use near_vm_compiler_singlepass::Singlepass;
-use near_vm_engine::{Engine, Executable};
-use near_vm_engine_universal::{
+use near_vm_engine::universal::{
     Universal, UniversalEngine, UniversalExecutable, UniversalExecutableRef,
 };
-use near_vm_errors::{
+use near_vm_logic::errors::{
     CacheError, CompilationError, FunctionCallError, MethodResolveError, VMRunnerError, WasmTrap,
 };
 use near_vm_logic::gas_counter::FastGasCounter;
 use near_vm_logic::types::{PromiseResult, ProtocolVersion};
-use near_vm_logic::{External, MemSlice, MemoryLike, VMConfig, VMContext, VMLogic, VMOutcome};
-use near_vm_types::{Features, FunctionIndex, InstanceConfig, MemoryType, Pages, WASM_PAGE_SIZE};
+use near_vm_logic::{
+    CompiledContract, CompiledContractCache, External, MemSlice, MemoryLike, VMConfig, VMContext,
+    VMLogic, VMOutcome,
+};
+use near_vm_types::{FunctionIndex, InstanceConfig, MemoryType, Pages, WASM_PAGE_SIZE};
 use near_vm_vm::{
     Artifact, Instantiatable, LinearMemory, LinearTable, Memory, MemoryStyle, TrapCode, VMMemory,
 };
@@ -28,23 +29,6 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::sync::Arc;
-
-const VM_FEATURES: Features = Features {
-    threads: WASM_FEATURES.threads,
-    reference_types: WASM_FEATURES.reference_types,
-    simd: WASM_FEATURES.simd,
-    bulk_memory: WASM_FEATURES.bulk_memory,
-    multi_value: WASM_FEATURES.multi_value,
-    tail_call: WASM_FEATURES.tail_call,
-    multi_memory: WASM_FEATURES.multi_memory,
-    memory64: WASM_FEATURES.memory64,
-    exceptions: WASM_FEATURES.exceptions,
-    mutable_global: true,
-    // These are blocked at prepare by pwasm parser, but once that is gone these are going to be
-    // the only check we have.
-    saturating_float_to_int: false,
-    sign_extension: false,
-};
 
 #[derive(Clone)]
 pub struct NearVmMemory(Arc<LinearMemory>);
@@ -141,7 +125,7 @@ impl MemoryLike for NearVmMemory {
 }
 
 fn get_entrypoint_index(
-    artifact: &near_vm_engine_universal::UniversalArtifact,
+    artifact: &near_vm_engine::universal::UniversalArtifact,
     method_name: &str,
 ) -> Result<FunctionIndex, FunctionCallError> {
     if method_name.is_empty() {
@@ -168,7 +152,7 @@ fn translate_runtime_error(
 ) -> Result<FunctionCallError, VMRunnerError> {
     // Errors produced by host function calls also become `RuntimeError`s that wrap a dynamic
     // instance of `VMLogicError` internally. See the implementation of `NearVmImports`.
-    let error = match error.downcast::<near_vm_errors::VMLogicError>() {
+    let error = match error.downcast::<near_vm_logic::VMLogicError>() {
         Ok(vm_logic) => {
             return vm_logic.try_into();
         }
@@ -237,7 +221,7 @@ impl NearVmConfig {
 //  major version << 6
 //  minor version
 const VM_CONFIG: NearVmConfig = NearVmConfig {
-    seed: (2 << 10) | (1 << 6) | 1,
+    seed: (2 << 10) | (1 << 6) | 2,
     engine: NearVmEngine::Universal,
     compiler: NearVmCompiler::Singlepass,
 };
@@ -246,7 +230,7 @@ pub(crate) fn near_vm_vm_hash() -> u64 {
     VM_CONFIG.config_hash()
 }
 
-pub(crate) type VMArtifact = Arc<near_vm_engine_universal::UniversalArtifact>;
+pub(crate) type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
 
 pub(crate) struct NearVM {
     pub(crate) config: VMConfig,
@@ -260,9 +244,11 @@ impl NearVM {
         let compiler = Singlepass::new();
         // We only support universal engine at the moment.
         assert_eq!(VM_CONFIG.engine, NearVmEngine::Universal);
+        let features =
+            crate::features::WasmFeatures::from(config.limit_config.contract_prepare_version);
         Self {
             config,
-            engine: Universal::new(compiler).target(target).features(VM_FEATURES).engine(),
+            engine: Universal::new(compiler).target(target).features(features.into()).engine(),
         }
     }
 
@@ -406,7 +392,7 @@ impl NearVM {
         return {
             static MEM_CACHE: once_cell::sync::Lazy<
                 near_cache::SyncLruCache<
-                    near_primitives::hash::CryptoHash,
+                    near_primitives_core::hash::CryptoHash,
                     Result<VMArtifact, CompilationError>,
                 >,
             > = once_cell::sync::Lazy::new(|| {
@@ -746,8 +732,10 @@ impl crate::runner::VM for NearVM {
         &self,
         code: &ContractCode,
         cache: &dyn CompiledContractCache,
-    ) -> Result<Result<ContractPrecompilatonResult, CompilationError>, near_vm_errors::CacheError>
-    {
+    ) -> Result<
+        Result<ContractPrecompilatonResult, CompilationError>,
+        near_vm_logic::errors::CacheError,
+    > {
         Ok(self
             .compile_and_cache(code, Some(cache))?
             .map(|_| ContractPrecompilatonResult::ContractCompiled))

@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
+use near_epoch_manager::types::BlockHeaderInfo;
 use near_epoch_manager::{EpochManagerAdapter, RngSeed};
 use near_primitives::sandbox::state_patch::SandboxStatePatch;
 use near_primitives::state_part::PartId;
@@ -45,14 +46,10 @@ use near_store::{
     DBCol, PartialStorage, ShardTries, Store, StoreUpdate, Trie, TrieChanges, WrappedTrieChanges,
 };
 
-use crate::types::{
-    ApplySplitStateResult, ApplyTransactionResult, BlockHeaderInfo, RuntimeAdapter,
-};
+use crate::types::{ApplySplitStateResult, ApplyTransactionResult, RuntimeAdapter};
 use crate::BlockHeader;
 
 use near_primitives::epoch_manager::ShardConfig;
-
-use near_store::flat::{FlatStorage, FlatStorageStatus};
 
 use super::ValidatorSchedule;
 
@@ -743,6 +740,13 @@ impl EpochManagerAdapter for MockEpochManager {
         })
     }
 
+    fn add_validator_proposals(
+        &self,
+        _block_header_info: BlockHeaderInfo,
+    ) -> Result<StoreUpdate, EpochError> {
+        Ok(self.store.store_update())
+    }
+
     fn get_epoch_minted_amount(&self, _epoch_id: &EpochId) -> Result<Balance, EpochError> {
         Ok(0)
     }
@@ -960,6 +964,10 @@ impl RuntimeAdapter for KeyValueRuntime {
             .get_trie_for_shard(ShardUId { version: 0, shard_id: shard_id as u32 }, state_root))
     }
 
+    fn get_flat_storage_manager(&self) -> Option<near_store::flat::FlatStorageManager> {
+        None
+    }
+
     fn get_view_trie_for_shard(
         &self,
         shard_id: ShardId,
@@ -970,35 +978,6 @@ impl RuntimeAdapter for KeyValueRuntime {
             ShardUId { version: 0, shard_id: shard_id as u32 },
             state_root,
         ))
-    }
-
-    fn get_flat_storage_for_shard(&self, _shard_uid: ShardUId) -> Option<FlatStorage> {
-        None
-    }
-
-    fn get_flat_storage_status(&self, _shard_uid: ShardUId) -> FlatStorageStatus {
-        FlatStorageStatus::Disabled
-    }
-
-    fn create_flat_storage_for_shard(&self, shard_uid: ShardUId) {
-        panic!("Flat storage state can't be created for shard {shard_uid} because KeyValueRuntime doesn't support this");
-    }
-
-    fn remove_flat_storage_for_shard(
-        &self,
-        _shard_uid: ShardUId,
-        _epoch_id: &EpochId,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn set_flat_storage_for_genesis(
-        &self,
-        _genesis_block: &CryptoHash,
-        _genesis_block_height: BlockHeight,
-        _genesis_epoch_id: &EpochId,
-    ) -> Result<StoreUpdate, Error> {
-        Ok(self.store.store_update())
     }
 
     fn validate_tx(
@@ -1030,13 +1009,6 @@ impl RuntimeAdapter for KeyValueRuntime {
             res.push(iter.next().unwrap());
         }
         Ok(res)
-    }
-
-    fn add_validator_proposals(
-        &self,
-        _block_header_info: BlockHeaderInfo,
-    ) -> Result<StoreUpdate, Error> {
-        Ok(self.store.store_update())
     }
 
     fn apply_transactions_with_optional_storage_proof(

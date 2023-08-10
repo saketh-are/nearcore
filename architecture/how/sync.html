@@ -181,10 +181,10 @@ db resources.</p>
 <p>Notice that in the image above - it is enough to only get the ‘last’ header from
 each epoch. For the ‘current’ epoch, we still need to get all the headers.</p>
 <h3 id="step-2-state-sync-normal-node"><a class="header" href="#step-2-state-sync-normal-node">Step 2: State sync [normal node]</a></h3>
-<p>After header sync - if you notice that you’re too far behind (controlled by
-<code>block_fetch_horizon</code> config option) <strong>AND</strong> that the chain head is in a different
-epoch than your local head - the node will try to do the ‘state sync’.</p>
-<p>The idea of the state sync - is rather than trying to process all the blocks -
+<p>After header sync - if you notice that you’re too far behind, i.e. the chain
+head is at least two epochs ahead of your local head - the node will try to do
+the ‘state sync’.</p>
+<p>The idea of the state sync is - rather than trying to process all the blocks -
 try to ‘jump’ ahead by downloading the freshest state instead - and continue
 processing blocks from that place in the chain. As a side effect, it is going to
 create a ‘gap’ in the chunks/state on this node (which is fine - as the data
@@ -194,6 +194,7 @@ the beginning of the epoch - it cannot sync to any random block.</p>
 history and cannot have any gaps.</p>
 <p><img src="https://user-images.githubusercontent.com/1711539/195892354-cf2befed-98e9-40a2-9b81-b5cf738406e0.png" alt="image" /></p>
 <p>In this case, we can skip processing transactions that are in the blocks 124 - 128, and start from 129 (after sync state finishes)</p>
+<p>See <a href="../../misc/state_sync_from_external_storage.html">how-to</a> to learn how to configure your node to state sync.</p>
 <h3 id="step-3-block-sync-aka-body-sync-archival-node-normal-node-downloading-blocks"><a class="header" href="#step-3-block-sync-aka-body-sync-archival-node-normal-node-downloading-blocks">Step 3: Block sync (a.k.a Body sync) [archival node, normal node] (“downloading blocks”)</a></h3>
 <p>The final step is to start requesting and processing blocks as soon as possible,
 hoping to catch up with the chain.</p>

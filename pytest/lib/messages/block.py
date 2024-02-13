@@ -35,6 +35,14 @@ class BlockV3:
     pass
 
 
+class BlockV4:
+    pass
+
+
+class BlockBodyV1:
+    pass
+
+
 class BlockBody:
     pass
 
@@ -252,6 +260,7 @@ block_schema = [
                 ['BlockV1', BlockV1],
                 ['BlockV2', BlockV2],
                 ['BlockV3', BlockV3],
+                ['BlockV4', BlockV4],
             ]
         }
     ],
@@ -288,12 +297,21 @@ block_schema = [
             'kind': 'struct',
             'fields': [
                 ['header', BlockHeader],
+                ['body', BlockBodyV1],
+            ]
+        }
+    ],
+    [
+        BlockV4, {
+            'kind': 'struct',
+            'fields': [
+                ['header', BlockHeader],
                 ['body', BlockBody],
             ]
         }
     ],
     [
-        BlockBody,
+        BlockBodyV1,
         {
             'kind':
                 'struct',
@@ -302,6 +320,18 @@ block_schema = [
                 ['challenges', [()]],  # TODO
                 ['vrf_value', [32]],
                 ['vrf_proof', [64]],
+            ]
+        }
+    ],
+    [
+        BlockBody,
+        {
+            'kind':
+                'enum',
+            'field':
+                'enum',
+            'values': [
+                ['V1', BlockBodyV1],
             ]
         }
     ],

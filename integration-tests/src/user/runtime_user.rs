@@ -8,7 +8,7 @@ use near_jsonrpc_primitives::errors::ServerError;
 use near_parameters::RuntimeConfig;
 use near_primitives::errors::{RuntimeError, TxExecutionError};
 use near_primitives::hash::CryptoHash;
-use near_primitives::receipt::Receipt;
+use near_primitives::receipt::{Receipt, ReceiptEnum};
 use near_primitives::runtime::migration_data::{MigrationData, MigrationFlags};
 use near_primitives::test_utils::MockEpochInfoProvider;
 use near_primitives::transaction::SignedTransaction;
@@ -198,31 +198,44 @@ impl RuntimeUser {
         let mut outcomes = self.get_recursive_transaction_results(hash);
         let mut looking_for_id = *hash;
         let num_outcomes = outcomes.len();
-        let status = outcomes
-            .iter()
-            .find_map(|outcome_with_id| {
-                if outcome_with_id.id == looking_for_id {
-                    match &outcome_with_id.outcome.status {
-                        ExecutionStatusView::Unknown if num_outcomes == 1 => {
-                            Some(FinalExecutionStatus::NotStarted)
-                        }
-                        ExecutionStatusView::Unknown => Some(FinalExecutionStatus::Started),
-                        ExecutionStatusView::Failure(e) => {
-                            Some(FinalExecutionStatus::Failure(e.clone()))
-                        }
-                        ExecutionStatusView::SuccessValue(v) => {
-                            Some(FinalExecutionStatus::SuccessValue(v.clone()))
-                        }
-                        ExecutionStatusView::SuccessReceiptId(id) => {
-                            looking_for_id = *id;
-                            None
-                        }
+
+        let status = outcomes.iter().find_map(|outcome_with_id| {
+            if outcome_with_id.id == looking_for_id {
+                match &outcome_with_id.outcome.status {
+                    ExecutionStatusView::Unknown if num_outcomes == 1 => {
+                        Some(FinalExecutionStatus::NotStarted)
                     }
-                } else {
-                    None
+                    ExecutionStatusView::Unknown => Some(FinalExecutionStatus::Started),
+                    ExecutionStatusView::Failure(e) => {
+                        Some(FinalExecutionStatus::Failure(e.clone()))
+                    }
+                    ExecutionStatusView::SuccessValue(v) => {
+                        Some(FinalExecutionStatus::SuccessValue(v.clone()))
+                    }
+                    ExecutionStatusView::SuccessReceiptId(id) => {
+                        looking_for_id = *id;
+                        None
+                    }
                 }
-            })
-            .expect("results should resolve to a final outcome");
+            } else {
+                None
+            }
+        });
+
+        let status = status.unwrap_or_else(|| {
+            // Outcome is permitted to be a receipt if it's an unresolved PromiseYield
+            if self
+                .receipts
+                .borrow()
+                .get(&looking_for_id)
+                .is_some_and(|receipt| matches!(receipt.receipt, ReceiptEnum::PromiseYield(_)))
+            {
+                FinalExecutionStatus::NotStarted
+            } else {
+                panic!("results should resolve to a final outcome");
+            }
+        });
+
         let receipts = outcomes.split_off(1);
         let transaction = self.transactions.borrow().get(hash).unwrap().clone().into();
         FinalExecutionOutcomeView {

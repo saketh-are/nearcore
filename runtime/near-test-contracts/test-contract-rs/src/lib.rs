@@ -341,6 +341,20 @@ pub unsafe fn read_value() {
 }
 
 #[no_mangle]
+pub unsafe fn call_storage_read() {
+    input(0);
+    let key = vec![0u8; register_len(0) as usize];
+    read_register(0, key.as_ptr() as u64);
+
+    let result = storage_read(key.len() as u64, key.as_ptr() as u64, 1);
+    if result == 1 {
+        let value = vec![0u8; register_len(1) as usize];
+        read_register(1, value.as_ptr() as u64);
+        value_return(value.len() as u64, value.as_ptr() as u64);
+    }
+}
+
+#[no_mangle]
 pub unsafe fn log_something() {
     let data = b"hello";
     log_utf8(data.len() as u64, data.as_ptr() as _);
@@ -887,6 +901,7 @@ unsafe fn check_promise_result() {
 
 /// Call promise_yield_create, specifying `check_promise_result` as the yield callback.
 /// Given input is passed as the argument to the `check_promise_result` function call.
+/// Returns the data id which can be used to resume the yield.
 #[cfg(feature = "nightly")]
 #[no_mangle]
 pub unsafe fn call_yield_create() {
@@ -914,6 +929,47 @@ pub unsafe fn call_yield_create() {
     read_register(data_id_register, data_id.as_ptr() as u64);
 
     value_return(data_id.len() as u64, data_id.as_ptr() as u64);
+}
+
+/// Call promise_yield_create, specifying `check_promise_result` as the yield callback.
+/// Given input is passed as the argument to the `check_promise_result` function call.
+/// Returns the value returned by the yield callback. Writes the data id to storage.
+#[cfg(feature = "nightly")]
+#[no_mangle]
+pub unsafe fn call_and_return_yield_create() {
+    input(0);
+    let payload = vec![0u8; register_len(0) as usize];
+    read_register(0, payload.as_ptr() as u64);
+
+    // Create a promise yield with callback `check_promise_result`,
+    // passing the expected payload as an argument to the function.
+    let method_name = "check_promise_result";
+    let gas_fixed = 0;
+    let gas_weight = 1;
+    let data_id_register = 0;
+    let promise_index = promise_yield_create(
+        method_name.len() as u64,
+        method_name.as_ptr() as u64,
+        payload.len() as u64,
+        payload.as_ptr() as u64,
+        gas_fixed,
+        gas_weight,
+        data_id_register,
+    );
+
+    let data_id = vec![0u8; register_len(0) as usize];
+    read_register(data_id_register, data_id.as_ptr() as u64);
+
+    let key = b"yield data id";
+    storage_write(
+        key.len() as u64,
+        key.as_ptr() as u64,
+        data_id.len() as u64,
+        data_id.as_ptr() as u64,
+        0,
+    );
+
+    promise_return(promise_index);
 }
 
 /// Call promise_yield_resume.

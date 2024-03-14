@@ -75,7 +75,7 @@ def check_memory_usage(node):
 def check_slow_blocks(initial_metrics, final_metrics):
     delta = Metrics.diff(final_metrics, initial_metrics)
     slow_process_blocks = delta.block_processing_time[
-        'le +Inf'] - delta.block_processing_time['le 1']
+                              'le +Inf'] - delta.block_processing_time['le 1']
     logger.info(
         f'Number of blocks processing for more than 1s: {slow_process_blocks}')
     return slow_process_blocks == 0
@@ -83,7 +83,9 @@ def check_slow_blocks(initial_metrics, final_metrics):
 
 def override_config(node, config):
     # Add config here depending on the specific node build.
+    config["consensus"]["min_num_peers"] = 0
     pass
+    # config["tracked_shards"] = []
     """
     if "bad" in node.instance_name:
         config["adversarial"] = {
@@ -187,7 +189,7 @@ if __name__ == '__main__':
         mocknet.create_and_upload_genesis_file_from_empty_genesis(
             # Give bad validators less stake.
             [(node, bad_validator_stake * mocknet.ONE_NEAR if get_role(node)
-              == Role.BadValidator else good_validator_stake * mocknet.ONE_NEAR)
+                                                              == Role.BadValidator else good_validator_stake * mocknet.ONE_NEAR)
              for node in validator_nodes],
             rpc_nodes,
             chain_id,

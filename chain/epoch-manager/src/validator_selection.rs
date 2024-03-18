@@ -55,6 +55,10 @@ pub fn proposals_to_epoch_info(
         min_stake_ratio,
         last_version,
     );
+    let mut cv_proposals = order_proposals(proposals.values().cloned());
+    let max_cv_selected = 300 as usize; // DEBUG
+    let (chunk_validators, cv_threshold) =
+        select_validators(&mut cv_proposals, max_cv_selected, min_stake_ratio, last_version);
     let (chunk_producer_proposals, chunk_producers, cp_stake_threshold) =
         if checked_feature!("stable", ChunkOnlyProducers, next_version) {
             let mut chunk_producer_proposals = order_proposals(proposals.into_values());
@@ -74,7 +78,7 @@ pub fn proposals_to_epoch_info(
 
     // since block producer proposals could become chunk producers, their actual stake threshold
     // is the smaller of the two thresholds
-    let threshold = cmp::min(bp_stake_threshold, cp_stake_threshold);
+    let threshold = cv_threshold; // cmp::min(bp_stake_threshold, cp_stake_threshold);
 
     // process remaining chunk_producer_proposals that were not selected for either role
     for OrderedValidatorStake(p) in chunk_producer_proposals {
@@ -98,8 +102,9 @@ pub fn proposals_to_epoch_info(
     }
 
     let num_chunk_producers = chunk_producers.len();
+    let num_all_validators = chunk_validators.len();
     // Constructing `all_validators` such that a validators position corresponds to its `ValidatorId`.
-    let mut all_validators: Vec<ValidatorStake> = Vec::with_capacity(num_chunk_producers);
+    let mut all_validators: Vec<ValidatorStake> = Vec::with_capacity(num_all_validators);
     let mut validator_to_index = HashMap::new();
     let mut block_producers_settlement = Vec::with_capacity(block_producers.len());
 
@@ -107,7 +112,12 @@ pub fn proposals_to_epoch_info(
         let id = i as ValidatorId;
         validator_to_index.insert(bp.account_id().clone(), id);
         block_producers_settlement.push(id);
-        all_validators.push(bp);
+        // all_validators.push(bp);
+    }
+    for (i, cv) in chunk_validators.into_iter().enumerate() {
+        let id = i as ValidatorId;
+        validator_to_index.insert(cv.account_id().clone(), id);
+        all_validators.push(cv);
     }
 
     let chunk_producers_settlement = if checked_feature!("stable", ChunkOnlyProducers, next_version)

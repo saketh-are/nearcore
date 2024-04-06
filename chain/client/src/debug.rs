@@ -665,6 +665,8 @@ fn new_peer_info_view(chain: &Chain, connected_peer_info: &ConnectedPeerInfo) ->
             .whole_milliseconds() as u64,
         is_outbound_peer: connected_peer_info.peer_type == PeerType::Outbound,
         nonce: connected_peer_info.nonce,
+
+        last_rtt: connected_peer_info.last_rtt,
     }
 }
 

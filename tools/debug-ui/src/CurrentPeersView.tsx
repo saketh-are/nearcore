@@ -246,6 +246,7 @@ export const CurrentPeersView = ({ addr }: NetworkInfoViewProps) => {
                         <th>First connection</th>
                         <th>Traffic (last minute)</th>
                         <th>Route to validators</th>
+                        <th>RTT</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -289,6 +290,9 @@ export const CurrentPeersView = ({ addr }: NetworkInfoViewProps) => {
                                 </td>
                                 <td>
                                     <CollapsableValidatorList validators={routedValidator} />
+                                </td>
+                                <td>
+                                    {peer.last_rtt}
                                 </td>
                             </tr>
                         );

@@ -11,9 +11,9 @@ use crate::config::PEERS_RESPONSE_MAX_PEERS;
 use crate::network_protocol::SnapshotHostInfoVerificationError;
 use crate::network_protocol::{
     DistanceVector, Edge, EdgeState, Encoding, OwnedAccount, ParsePeerMessageError,
-    PartialEdgeInfo, PeerChainInfoV2, PeerIdOrHash, PeerInfo, PeersRequest, PeersResponse,
-    RawRoutedMessage, RoutedMessageBody, RoutingTableUpdate, StateResponseInfo, SyncAccountsData,
-    SyncSnapshotHosts,
+    PartialEdgeInfo, PeerChainInfoV2, PeerIdOrHash, PeerInfo, PeerPing, PeerPong, PeersRequest,
+    PeersResponse, RawRoutedMessage, RoutedMessageBody, RoutingTableUpdate, StateResponseInfo,
+    SyncAccountsData, SyncSnapshotHosts,
 };
 use crate::peer::stream;
 use crate::peer::tracker::Tracker;
@@ -49,8 +49,9 @@ use near_primitives::version::{
 };
 use parking_lot::Mutex;
 use rand::seq::IteratorRandom;
-use rand::thread_rng;
+use rand::{thread_rng, Rng};
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
@@ -76,6 +77,9 @@ pub(crate) const DROP_DUPLICATED_MESSAGES_PERIOD: time::Duration = time::Duratio
 const SYNC_LATEST_BLOCK_INTERVAL: time::Duration = time::Duration::seconds(60);
 /// How often to perform a full sync of AccountsData with the peer.
 const ACCOUNTS_DATA_FULL_SYNC_INTERVAL: time::Duration = time::Duration::minutes(10);
+
+/// How often to measure RTT
+const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(3);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionClosedEvent {
@@ -658,6 +662,8 @@ impl PeerActor {
             send_snapshot_hosts_demux: demux::Demux::new(
                 self.network_state.config.snapshot_hosts_broadcast_rate_limit,
             ),
+
+            last_rtt: AtomicCell::new(None),
         });
 
         let tracker = self.tracker.clone();
@@ -769,6 +775,47 @@ impl PeerActor {
                                             conn.send_message(Arc::new(PeerMessage::Block(
                                                 chain_info.block.clone(),
                                             )));
+                                        }
+                                    }
+                                }
+                            }));
+
+                            // Periodically initiate RTT measurement
+                            ctx.spawn(wrap_future({
+                                let clock = act.clock.clone();
+                                let conn = conn.clone();
+                                let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
+                                async move {
+                                    // Allocating and initializing a large payload vector is
+                                    // actually quite expensive, so we just store and reuse
+                                    // them. It shouldn't impact network RTT measurements since
+                                    // the payloads aren't being cached on the transport level.
+                                    let mut payloads = HashMap::new();
+
+                                    loop {
+                                        interval.tick(&clock).await;
+                                        let mut rng = thread_rng();
+
+                                        for len_mb in [0, 1, 2, 4, 8, 16] {
+                                            let t1 = clock.now_utc().unix_timestamp_nanos();
+                                            let payload: Vec<u8> = payloads.entry(len_mb).or_insert_with(|| {
+                                                let len = len_mb * 1024 * 1024;
+                                                let payload: Vec<u8> = 
+                                                    (0..len).map(|_| rng.gen()).collect();
+
+                                                payload
+                                            }).clone();
+                                            let t2 = clock.now_utc().unix_timestamp_nanos();
+
+                                            tracing::warn!(target: "network",
+                                                "RTT took {} ms to construct or clone payload of size {} MB", (t2 - t1) / 1000000, len_mb);
+
+                                            let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                                            conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
+                                                timestamp,
+                                                payload,
+                                            })));
                                         }
                                     }
                                 }
@@ -1479,6 +1526,39 @@ impl PeerActor {
                     }
                 }
             }
+
+            PeerMessage::PeerPing(msg) => {
+                ctx.spawn(wrap_future(async move {
+                    conn.send_message(Arc::new(PeerMessage::PeerPong(PeerPong {
+                        timestamp: msg.timestamp,
+                        payload_len: msg.payload.len() as u64,
+                    })));
+                }));
+            }
+            PeerMessage::PeerPong(msg) => {
+                let timestamp = (self.clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                let rtt = timestamp - msg.timestamp;
+                let payload_size = msg.payload_len / 1024 / 1024;
+
+                conn.last_rtt.store(Some(rtt));
+
+                tracing::warn!(target: "network",
+                    "RTT to send {} a payload of {} MB is {} ms",
+                    conn.peer_info.id,
+                    payload_size,
+                    rtt
+                );
+
+                metrics::PEER_RTT
+                    .with_label_values(&[
+                        &self.my_node_info.id.to_string(),
+                        &conn.peer_info.id.to_string(),
+                        &payload_size.to_string(),
+                    ])
+                    .observe(rtt as f64);
+            }
+
             msg => self.receive_message(ctx, &conn, msg),
         }
     }

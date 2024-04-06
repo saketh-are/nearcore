@@ -11,9 +11,9 @@ use crate::config::PEERS_RESPONSE_MAX_PEERS;
 use crate::network_protocol::SnapshotHostInfoVerificationError;
 use crate::network_protocol::{
     DistanceVector, Edge, EdgeState, Encoding, OwnedAccount, ParsePeerMessageError,
-    PartialEdgeInfo, PeerChainInfoV2, PeerIdOrHash, PeerInfo, PeersRequest, PeersResponse,
-    RawRoutedMessage, RoutedMessageBody, RoutingTableUpdate, StateResponseInfo, SyncAccountsData,
-    SyncSnapshotHosts,
+    PartialEdgeInfo, PeerChainInfoV2, PeerIdOrHash, PeerInfo, PeerPing, PeerPong, PeersRequest,
+    PeersResponse, RawRoutedMessage, RoutedMessageBody, RoutingTableUpdate, StateResponseInfo,
+    SyncAccountsData, SyncSnapshotHosts,
 };
 use crate::peer::stream;
 use crate::peer::tracker::Tracker;
@@ -76,6 +76,9 @@ pub(crate) const DROP_DUPLICATED_MESSAGES_PERIOD: time::Duration = time::Duratio
 const SYNC_LATEST_BLOCK_INTERVAL: time::Duration = time::Duration::seconds(60);
 /// How often to perform a full sync of AccountsData with the peer.
 const ACCOUNTS_DATA_FULL_SYNC_INTERVAL: time::Duration = time::Duration::minutes(10);
+
+/// How often to measure RTT
+const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(3);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionClosedEvent {
@@ -770,6 +773,24 @@ impl PeerActor {
                                                 chain_info.block.clone(),
                                             )));
                                         }
+                                    }
+                                }
+                            }));
+
+                            // Periodically initiate RTT measurement
+                            ctx.spawn(wrap_future({
+                                let clock = act.clock.clone();
+                                let conn = conn.clone();
+                                let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
+                                async move {
+                                    loop {
+                                        interval.tick(&clock).await;
+
+                                        let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                                        conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
+                                            timestamp
+                                        })));
                                     }
                                 }
                             }));
@@ -1479,6 +1500,22 @@ impl PeerActor {
                     }
                 }
             }
+
+            PeerMessage::PeerPing(msg) => {
+                ctx.spawn(wrap_future(async move {
+                    conn.send_message(Arc::new(PeerMessage::PeerPong(PeerPong {
+                        timestamp: msg.timestamp,
+                    })));
+                }));
+            }
+            PeerMessage::PeerPong(msg) => {
+                let timestamp = (self.clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                let rtt = timestamp - msg.timestamp;
+
+                tracing::warn!(target: "network", "RTT to {} is {} ms", conn.peer_info.id, rtt);
+            }
+
             msg => self.receive_message(ctx, &conn, msg),
         }
     }

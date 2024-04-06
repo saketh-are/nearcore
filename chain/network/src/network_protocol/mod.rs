@@ -387,6 +387,18 @@ pub struct PeersResponse {
     pub direct_peers: Vec<PeerInfo>,
 }
 
+/// Message sent to initiate RTT measurement
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct PeerPing {
+    pub timestamp: u64,
+}
+
+/// Message used to respond to incoming Ping
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct PeerPong {
+    pub timestamp: u64,
+}
+
 /// Message sent when gracefully disconnecting from the other peer.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Disconnect {
@@ -430,6 +442,9 @@ pub enum PeerMessage {
     StateRequestHeader(ShardId, CryptoHash),
     StateRequestPart(ShardId, CryptoHash, u64),
     VersionedStateResponse(StateResponseInfo),
+
+    PeerPing(PeerPing),
+    PeerPong(PeerPong),
 }
 
 impl fmt::Display for PeerMessage {

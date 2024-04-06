@@ -5,8 +5,8 @@ use crate::network_protocol::proto::peer_message::Message_type as ProtoMT;
 use crate::network_protocol::proto::{self};
 use crate::network_protocol::state_sync::{SnapshotHostInfo, SyncSnapshotHosts};
 use crate::network_protocol::{
-    AdvertisedPeerDistance, Disconnect, DistanceVector, PeerMessage, PeersRequest, PeersResponse,
-    RoutingTableUpdate, SyncAccountsData,
+    AdvertisedPeerDistance, Disconnect, DistanceVector, PeerMessage, PeerPing, PeerPong,
+    PeersRequest, PeersResponse, RoutingTableUpdate, SyncAccountsData,
 };
 use crate::network_protocol::{RoutedMessage, RoutedMessageV2};
 use crate::types::StateResponseInfo;
@@ -228,6 +228,24 @@ impl TryFrom<&proto::SyncSnapshotHosts> for SyncSnapshotHosts {
 
 //////////////////////////////////////////
 
+#[derive(thiserror::Error, Debug)]
+pub enum ParsePeerPingError {}
+
+impl From<&PeerPing> for proto::PeerPing {
+    fn from(x: &PeerPing) -> Self {
+        Self { timestamp: x.timestamp, ..Default::default() }
+    }
+}
+
+impl TryFrom<&proto::PeerPing> for PeerPing {
+    type Error = ParsePeerPingError;
+    fn try_from(x: &proto::PeerPing) -> Result<Self, Self::Error> {
+        Ok(Self { timestamp: x.timestamp })
+    }
+}
+
+//////////////////////////////////////////
+
 impl From<&PeerMessage> for proto::PeerMessage {
     fn from(x: &PeerMessage) -> Self {
         Self {
@@ -331,6 +349,15 @@ impl From<&PeerMessage> for proto::PeerMessage {
                         ..Default::default()
                     })
                 }
+
+                PeerMessage::PeerPing(p) => ProtoMT::PeerPing(proto::PeerPing {
+                    timestamp: p.timestamp,
+                    ..Default::default()
+                }),
+                PeerMessage::PeerPong(p) => ProtoMT::PeerPong(proto::PeerPong {
+                    timestamp: p.timestamp,
+                    ..Default::default()
+                }),
             }),
             ..Default::default()
         }
@@ -487,6 +514,9 @@ impl TryFrom<&proto::PeerMessage> for PeerMessage {
             ProtoMT::SyncSnapshotHosts(srh) => PeerMessage::SyncSnapshotHosts(
                 srh.try_into().map_err(Self::Error::SyncSnapshotHosts)?,
             ),
+
+            ProtoMT::PeerPing(p) => PeerMessage::PeerPing(PeerPing { timestamp: p.timestamp }),
+            ProtoMT::PeerPong(p) => PeerMessage::PeerPong(PeerPong { timestamp: p.timestamp }),
         })
     }
 }

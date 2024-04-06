@@ -442,6 +442,14 @@ message SyncSnapshotHosts {
   repeated SnapshotHostInfo hosts = 1;
 }
 
+message PeerPing {
+  uint64 timestamp = 1;
+}
+
+message PeerPong {
+  uint64 timestamp = 1;
+}
+
 // PeerMessage is a wrapper of all message types exchanged between NEAR nodes.
 // The wire format of a single message M consists of len(M)+4 bytes:
 // <len(M)> : 4 bytes : little endian uint32
@@ -498,5 +506,8 @@ message PeerMessage {
     StateRequestPart state_request_part = 30;
     StateResponse state_response = 31;
     SyncSnapshotHosts sync_snapshot_hosts = 32;
+
+    PeerPing peer_ping = 33;
+    PeerPong peer_pong = 34;
   }
 }

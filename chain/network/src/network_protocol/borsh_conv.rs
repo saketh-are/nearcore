@@ -253,6 +253,13 @@ impl From<&mem::PeerMessage> for net::PeerMessage {
                 net::PeerMessage::VersionedStateResponse(sri)
             }
             mem::PeerMessage::SyncSnapshotHosts(ssh) => net::PeerMessage::SyncSnapshotHosts(ssh),
+
+            mem::PeerMessage::PeerPing(_) => {
+                panic!("Tier1Handshake is not supported in Borsh encoding")
+            }
+            mem::PeerMessage::PeerPong(_) => {
+                panic!("Tier1Handshake is not supported in Borsh encoding")
+            }
         }
     }
 }

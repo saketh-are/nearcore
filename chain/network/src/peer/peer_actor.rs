@@ -796,13 +796,12 @@ impl PeerActor {
                                         interval.tick(&clock).await;
                                         let mut rng = thread_rng();
 
-                                        for len_mb in [16] {
+                                        for len_mb in [0, 1, 2, 4, 8, 16] {
                                             let t1 = clock.now_utc().unix_timestamp_nanos();
                                             let payload: Vec<u8> = payloads.entry(len_mb).or_insert_with(|| {
                                                 let len = len_mb * 1024 * 1024;
-
-                                                let t1 = clock.now_utc().unix_timestamp_nanos();
-                                                let payload: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+                                                let payload: Vec<u8> = 
+                                                    (0..len).map(|_| rng.gen()).collect();
 
                                                 payload
                                             }).clone();
@@ -1540,15 +1539,24 @@ impl PeerActor {
                 let timestamp = (self.clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
 
                 let rtt = timestamp - msg.timestamp;
+                let payload_size = msg.payload_len / 1024 / 1024;
 
                 conn.last_rtt.store(Some(rtt));
 
                 tracing::warn!(target: "network",
                     "RTT to send {} a payload of {} MB is {} ms",
                     conn.peer_info.id,
-                    msg.payload_len / 1024 / 1024,
+                    payload_size,
                     rtt
                 );
+
+                metrics::PEER_RTT
+                    .with_label_values(&[
+                        &self.my_node_info.id.to_string(),
+                        &conn.peer_info.id.to_string(),
+                        &payload_size.to_string(),
+                    ])
+                    .observe(rtt as f64);
             }
 
             msg => self.receive_message(ctx, &conn, msg),

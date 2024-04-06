@@ -383,6 +383,16 @@ pub(crate) static NETWORK_ROUTED_MSG_DISTANCES: Lazy<IntCounterVec> = Lazy::new(
     .unwrap()
 });
 
+pub(crate) static PEER_RTT: Lazy<HistogramVec> = Lazy::new(|| {
+    try_create_histogram_vec(
+        "near_peer_rtt",
+        "round-trip time, as a histogram in ms",
+        &["sender", "receiver", "payload_size"],
+        Some(exponential_buckets(1., 1.3, 30).unwrap()),
+    )
+    .unwrap()
+});
+
 /// Updated the prometheus metrics about the received routed message `msg`.
 /// `tier` indicates the network over which the message was transmitted.
 /// `fastest` indicates whether this message is the first copy of `msg` received -

@@ -387,6 +387,8 @@ pub struct PeerInfoView {
     pub is_outbound_peer: bool,
     /// Connection nonce.
     pub nonce: u64,
+
+    pub last_rtt: u64,
 }
 
 /// Information about a Producer: its account name, peer_id and a list of connected peers that

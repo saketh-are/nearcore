@@ -669,6 +669,8 @@ impl PeerManagerActor {
                 Some(e) => e.nonce(),
                 None => 0,
             },
+
+            last_rtt: cp.last_rtt.load().unwrap_or(0),
         };
         NetworkInfo {
             connected_peers: tier2.ready.values().map(connected_peer).collect(),

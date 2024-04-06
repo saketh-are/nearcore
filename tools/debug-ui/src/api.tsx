@@ -87,6 +87,8 @@ export interface PeerInfoView {
     connection_established_time_millis: number;
     is_outbound_peer: boolean;
     nonce: number;
+
+    last_rtt: number,
 }
 
 export interface KnownProducerView {

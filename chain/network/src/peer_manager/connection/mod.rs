@@ -106,6 +106,8 @@ pub(crate) struct Connection {
     pub send_accounts_data_demux: demux::Demux<Vec<Arc<SignedAccountData>>, ()>,
     /// Demultiplexer for the calls to send_snapshot_hosts().
     pub send_snapshot_hosts_demux: demux::Demux<Vec<Arc<SnapshotHostInfo>>, ()>,
+
+    pub last_rtt: AtomicCell<Option<u64>>,
 }
 
 impl fmt::Debug for Connection {

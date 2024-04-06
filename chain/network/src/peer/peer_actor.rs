@@ -661,6 +661,8 @@ impl PeerActor {
             send_snapshot_hosts_demux: demux::Demux::new(
                 self.network_state.config.snapshot_hosts_broadcast_rate_limit,
             ),
+
+            last_rtt: AtomicCell::new(None),
         });
 
         let tracker = self.tracker.clone();
@@ -1512,6 +1514,8 @@ impl PeerActor {
                 let timestamp = (self.clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
 
                 let rtt = timestamp - msg.timestamp;
+
+                conn.last_rtt.store(Some(rtt));
 
                 tracing::warn!(target: "network", "RTT to {} is {} ms", conn.peer_info.id, rtt);
             }

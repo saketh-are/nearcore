@@ -346,6 +346,8 @@ pub struct ConnectedPeerInfo {
     pub peer_type: PeerType,
     /// Nonce used for the connection with the peer.
     pub nonce: u64,
+
+    pub last_rtt: u64,
 }
 
 #[derive(Debug, Clone, actix::MessageResponse, PartialEq, Eq)]

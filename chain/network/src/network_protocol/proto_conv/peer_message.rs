@@ -226,26 +226,6 @@ impl TryFrom<&proto::SyncSnapshotHosts> for SyncSnapshotHosts {
     }
 }
 
-//////////////////////////////////////////
-
-#[derive(thiserror::Error, Debug)]
-pub enum ParsePeerPingError {}
-
-impl From<&PeerPing> for proto::PeerPing {
-    fn from(x: &PeerPing) -> Self {
-        Self { timestamp: x.timestamp, ..Default::default() }
-    }
-}
-
-impl TryFrom<&proto::PeerPing> for PeerPing {
-    type Error = ParsePeerPingError;
-    fn try_from(x: &proto::PeerPing) -> Result<Self, Self::Error> {
-        Ok(Self { timestamp: x.timestamp })
-    }
-}
-
-//////////////////////////////////////////
-
 impl From<&PeerMessage> for proto::PeerMessage {
     fn from(x: &PeerMessage) -> Self {
         Self {
@@ -352,10 +332,12 @@ impl From<&PeerMessage> for proto::PeerMessage {
 
                 PeerMessage::PeerPing(p) => ProtoMT::PeerPing(proto::PeerPing {
                     timestamp: p.timestamp,
+                    payload: p.payload.clone(),
                     ..Default::default()
                 }),
                 PeerMessage::PeerPong(p) => ProtoMT::PeerPong(proto::PeerPong {
                     timestamp: p.timestamp,
+                    payload_len: p.payload_len,
                     ..Default::default()
                 }),
             }),
@@ -515,8 +497,14 @@ impl TryFrom<&proto::PeerMessage> for PeerMessage {
                 srh.try_into().map_err(Self::Error::SyncSnapshotHosts)?,
             ),
 
-            ProtoMT::PeerPing(p) => PeerMessage::PeerPing(PeerPing { timestamp: p.timestamp }),
-            ProtoMT::PeerPong(p) => PeerMessage::PeerPong(PeerPong { timestamp: p.timestamp }),
+            ProtoMT::PeerPing(p) => PeerMessage::PeerPing(PeerPing {
+                timestamp: p.timestamp,
+                payload: p.payload.clone(),
+            }),
+            ProtoMT::PeerPong(p) => PeerMessage::PeerPong(PeerPong {
+                timestamp: p.timestamp,
+                payload_len: p.payload_len,
+            }),
         })
     }
 }

@@ -49,8 +49,9 @@ use near_primitives::version::{
 };
 use parking_lot::Mutex;
 use rand::seq::IteratorRandom;
-use rand::thread_rng;
+use rand::{thread_rng, Rng};
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
@@ -785,14 +786,38 @@ impl PeerActor {
                                 let conn = conn.clone();
                                 let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
                                 async move {
+                                    // Allocating and initializing a large payload vector is
+                                    // actually quite expensive, so we just store and reuse
+                                    // them. It shouldn't impact network RTT measurements since
+                                    // the payloads aren't being cached on the transport level.
+                                    let mut payloads = HashMap::new();
+
                                     loop {
                                         interval.tick(&clock).await;
+                                        let mut rng = thread_rng();
 
-                                        let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+                                        for len_mb in [16] {
+                                            let t1 = clock.now_utc().unix_timestamp_nanos();
+                                            let payload: Vec<u8> = payloads.entry(len_mb).or_insert_with(|| {
+                                                let len = len_mb * 1024 * 1024;
 
-                                        conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
-                                            timestamp
-                                        })));
+                                                let t1 = clock.now_utc().unix_timestamp_nanos();
+                                                let payload: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+
+                                                payload
+                                            }).clone();
+                                            let t2 = clock.now_utc().unix_timestamp_nanos();
+
+                                            tracing::warn!(target: "network",
+                                                "RTT took {} ms to construct or clone payload of size {} MB", (t2 - t1) / 1000000, len_mb);
+
+                                            let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                                            conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
+                                                timestamp,
+                                                payload,
+                                            })));
+                                        }
                                     }
                                 }
                             }));
@@ -1507,6 +1532,7 @@ impl PeerActor {
                 ctx.spawn(wrap_future(async move {
                     conn.send_message(Arc::new(PeerMessage::PeerPong(PeerPong {
                         timestamp: msg.timestamp,
+                        payload_len: msg.payload.len() as u64,
                     })));
                 }));
             }
@@ -1517,7 +1543,12 @@ impl PeerActor {
 
                 conn.last_rtt.store(Some(rtt));
 
-                tracing::warn!(target: "network", "RTT to {} is {} ms", conn.peer_info.id, rtt);
+                tracing::warn!(target: "network",
+                    "RTT to send {} a payload of {} MB is {} ms",
+                    conn.peer_info.id,
+                    msg.payload_len / 1024 / 1024,
+                    rtt
+                );
             }
 
             msg => self.receive_message(ctx, &conn, msg),

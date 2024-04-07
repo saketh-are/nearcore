@@ -388,7 +388,7 @@ pub(crate) static PEER_RTT: Lazy<HistogramVec> = Lazy::new(|| {
         "near_peer_rtt",
         "round-trip time, as a histogram in ms",
         &["sender", "receiver", "payload_size"],
-        Some(exponential_buckets(1., 1.3, 30).unwrap()),
+        Some(exponential_buckets(15., 1.3, 30).unwrap()),
     )
     .unwrap()
 });

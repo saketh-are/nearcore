@@ -119,6 +119,8 @@ else:
         (node_key_to_label, le_keys, le_map, size_keys, size_map, rtt_data) = data_loaded
 
 """ Draw plots """
+plt.rcParams['figure.figsize'] = [10, 8]  # Width, Height in inches
+
 for ((sender, receiver), arr) in rtt_data.items():
     if sender not in node_key_to_label:
         print("WARN unrecognized peer id {}", sender)
@@ -151,5 +153,5 @@ for ((sender, receiver), arr) in rtt_data.items():
 
     plt.gca().invert_yaxis()
     plt.title( "{} to {}".format(sender, receiver) )
-    plt.show()
+    plt.savefig('{}_to_{}.png'.format(sender, receiver))
 

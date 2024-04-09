@@ -693,6 +693,7 @@ impl PeerActor {
 
         #[cfg(test)]
         let edge_clone = edge.clone();
+        let my_info = self.my_node_info.clone();
         // Here we stop processing any PeerActor events until PeerManager
         // decides whether to accept the connection or not: ctx.wait makes
         // the actor event loop poll on the future until it completes before
@@ -706,7 +707,7 @@ impl PeerActor {
             .map(move |res, act: &mut PeerActor, ctx| {
                 match res {
                     Ok(()) => {
-                        act.peer_info = Some(peer_info).into();
+                        act.peer_info = Some(peer_info.clone()).into();
                         act.peer_status = PeerStatus::Ready(conn.clone());
                         // Respond to handshake if it's inbound and connection was consolidated.
                         if act.peer_type == PeerType::Inbound {
@@ -780,7 +781,7 @@ impl PeerActor {
                                 }
                             }));
 
-                            if self.my_node_info.id < peer_info.id {
+                            if my_info.id < peer_info.id {
                                 // Periodically initiate RTT measurement
                                 ctx.spawn(wrap_future({
                                     let clock = act.clock.clone();

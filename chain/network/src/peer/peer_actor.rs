@@ -795,7 +795,7 @@ impl PeerActor {
                                         let mut payloads = Vec::new();
                                         for len in [0, 1, 2, 4, 8, 16] {
                                             let mut rng = thread_rng();
-                                            payloads.push((0..len).map(|_| rng.gen()).collect::<Vec<u8>>());
+                                            payloads.push((0..(len * 1024 * 1024)).map(|_| rng.gen()).collect::<Vec<u8>>());
                                         }
                                         let mut next_len = 0;
                                         loop {

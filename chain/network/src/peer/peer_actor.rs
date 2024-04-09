@@ -780,39 +780,41 @@ impl PeerActor {
                                 }
                             }));
 
-                            // Periodically initiate RTT measurement
-                            ctx.spawn(wrap_future({
-                                let clock = act.clock.clone();
-                                let conn = conn.clone();
-                                let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
-                                async move {
-                                    // Allocating and initializing a large payload vector is
-                                    // actually quite expensive, so we just store and reuse
-                                    // them. It shouldn't impact network RTT measurements since
-                                    // the payloads aren't being cached on the transport level.
-                                    let mut payloads = Vec::new();
-                                    for len in [0, 1, 2, 4, 8, 16] {
-                                        let mut rng = thread_rng();
-                                        payloads.push((0..len).map(|_| rng.gen()).collect::<Vec<u8>>());
+                            if self.my_node_info.id < peer_info.id {
+                                // Periodically initiate RTT measurement
+                                ctx.spawn(wrap_future({
+                                    let clock = act.clock.clone();
+                                    let conn = conn.clone();
+                                    let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
+                                    async move {
+                                        // Allocating and initializing a large payload vector is
+                                        // actually quite expensive, so we just store and reuse
+                                        // them. It shouldn't impact network RTT measurements since
+                                        // the payloads aren't being cached on the transport level.
+                                        let mut payloads = Vec::new();
+                                        for len in [0, 1, 2, 4, 8, 16] {
+                                            let mut rng = thread_rng();
+                                            payloads.push((0..len).map(|_| rng.gen()).collect::<Vec<u8>>());
+                                        }
+                                        let mut next_len = 0;
+                                        loop {
+                                            interval.tick(&clock).await;
+
+                                            let t1 = clock.now_utc().unix_timestamp_nanos();
+                                            let payload = payloads[next_len].clone();
+                                            let t2 = clock.now_utc().unix_timestamp_nanos();
+                                            next_len = (next_len + 1) % payloads.len();
+
+                                            let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
+
+                                            conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
+                                                timestamp,
+                                                payload,
+                                            })));
+                                        }
                                     }
-                                    let mut next_len = 0;
-                                    loop {
-                                        interval.tick(&clock).await;
-
-                                        let t1 = clock.now_utc().unix_timestamp_nanos();
-                                        let payload = payloads[next_len].clone();
-                                        let t2 = clock.now_utc().unix_timestamp_nanos();
-                                        next_len = (next_len + 1) % payloads.len();
-
-                                        let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
-
-                                        conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
-                                            timestamp,
-                                            payload,
-                                        })));
-                                    }
-                                }
-                            }));
+                                }));
+                            }
 
                             // Refresh connection nonces but only if we're outbound. For inbound connection, the other party should
                             // take care of nonce refresh.

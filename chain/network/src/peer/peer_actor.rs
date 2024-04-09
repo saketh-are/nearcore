@@ -790,33 +790,26 @@ impl PeerActor {
                                     // actually quite expensive, so we just store and reuse
                                     // them. It shouldn't impact network RTT measurements since
                                     // the payloads aren't being cached on the transport level.
-                                    let mut payloads = HashMap::new();
-
+                                    let mut payloads = Vec::new();
+                                    for len in [0, 1, 2, 4, 8, 16] {
+                                        let mut rng = thread_rng();
+                                        payloads.push((0..len).map(|_| rng.gen()).collect::<Vec<u8>>());
+                                    }
+                                    let mut next_len = 0;
                                     loop {
                                         interval.tick(&clock).await;
-                                        let mut rng = thread_rng();
 
-                                        for len_mb in [0, 1, 2, 4, 8, 16] {
-                                            let t1 = clock.now_utc().unix_timestamp_nanos();
-                                            let payload: Vec<u8> = payloads.entry(len_mb).or_insert_with(|| {
-                                                let len = len_mb * 1024 * 1024;
-                                                let payload: Vec<u8> = 
-                                                    (0..len).map(|_| rng.gen()).collect();
+                                        let t1 = clock.now_utc().unix_timestamp_nanos();
+                                        let payload = payloads[next_len].clone();
+                                        let t2 = clock.now_utc().unix_timestamp_nanos();
+                                        next_len = (next_len + 1) % payloads.len();
 
-                                                payload
-                                            }).clone();
-                                            let t2 = clock.now_utc().unix_timestamp_nanos();
+                                        let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
 
-                                            tracing::warn!(target: "network",
-                                                "RTT took {} ms to construct or clone payload of size {} MB", (t2 - t1) / 1000000, len_mb);
-
-                                            let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
-
-                                            conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
-                                                timestamp,
-                                                payload,
-                                            })));
-                                        }
+                                        conn.send_message(Arc::new(PeerMessage::PeerPing(PeerPing {
+                                            timestamp,
+                                            payload,
+                                        })));
                                     }
                                 }
                             }));

@@ -11,13 +11,16 @@ def get_keys(node_ips):
         url = "http://{}:3030/status".format(ip)
         status = urllib.request.urlopen(url).read()
 
-        index = status.find(b'\"node_public_key\"')
-        peer_id = str(status[slice(index + 19, index + 71)], 'utf-8')
-        node_key_to_label[peer_id] = node
+        key = b'\"node_public_key\"'
+        start = status.find(key) + len(key) + 2
+        end = status.find(b'"', start)
+        print(status)
+        print(start, end)
+        print(status[slice(start, len(status))])
+        peer_id = str(status[slice(start, end)], 'utf-8')
 
-        index = status.find(b'\"node_key\"')
-        peer_id = str(status[slice(index + 12, index + 64)], 'utf-8')
         node_key_to_label[peer_id] = node
+        print("node_public_key ", peer_id, " is at ", ip)
 
     return node_key_to_label
 
@@ -111,7 +114,7 @@ if len(sys.argv) < 3:
     with open('data.pkl', 'wb') as file:
         pickle.dump(all_data, file)
 else:
-    with open('data.pkl', 'rb') as file:
+    with open(sys.argv[2], 'rb') as file:
         data_loaded = pickle.load(file)
         (node_key_to_label, le_keys, le_map, size_keys, size_map, rtt_data) = data_loaded
 
@@ -147,6 +150,6 @@ for ((sender, receiver), arr) in rtt_data.items():
                    ha="center", va="center", color="w")
 
     plt.gca().invert_yaxis()
-    plt.title( "{} ==> {}".format(sender, receiver) )
+    plt.title( "{} to {}".format(sender, receiver) )
     plt.show()
 

@@ -51,7 +51,6 @@ use parking_lot::Mutex;
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
 use std::cmp::min;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
@@ -79,7 +78,7 @@ const SYNC_LATEST_BLOCK_INTERVAL: time::Duration = time::Duration::seconds(60);
 const ACCOUNTS_DATA_FULL_SYNC_INTERVAL: time::Duration = time::Duration::minutes(10);
 
 /// How often to measure RTT
-const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(3);
+const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionClosedEvent {
@@ -693,6 +692,7 @@ impl PeerActor {
 
         #[cfg(test)]
         let edge_clone = edge.clone();
+        let my_info = self.my_node_info.clone();
         // Here we stop processing any PeerActor events until PeerManager
         // decides whether to accept the connection or not: ctx.wait makes
         // the actor event loop poll on the future until it completes before
@@ -706,7 +706,7 @@ impl PeerActor {
             .map(move |res, act: &mut PeerActor, ctx| {
                 match res {
                     Ok(()) => {
-                        act.peer_info = Some(peer_info).into();
+                        act.peer_info = Some(peer_info.clone()).into();
                         act.peer_status = PeerStatus::Ready(conn.clone());
                         // Respond to handshake if it's inbound and connection was consolidated.
                         if act.peer_type == PeerType::Inbound {
@@ -780,35 +780,28 @@ impl PeerActor {
                                 }
                             }));
 
-                            // Periodically initiate RTT measurement
-                            ctx.spawn(wrap_future({
-                                let clock = act.clock.clone();
-                                let conn = conn.clone();
-                                let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
-                                async move {
-                                    // Allocating and initializing a large payload vector is
-                                    // actually quite expensive, so we just store and reuse
-                                    // them. It shouldn't impact network RTT measurements since
-                                    // the payloads aren't being cached on the transport level.
-                                    let mut payloads = HashMap::new();
+                            if my_info.id < peer_info.id {
+                                // Periodically initiate RTT measurement
+                                ctx.spawn(wrap_future({
+                                    let clock = act.clock.clone();
+                                    let conn = conn.clone();
+                                    let mut interval = time::Interval::new(clock.now(), MEASURE_RTT_INTERVAL);
+                                    async move {
+                                        // Allocating and initializing a large payload vector is
+                                        // actually quite expensive, so we just store and reuse
+                                        // them. It shouldn't impact network RTT measurements since
+                                        // the payloads aren't being cached on the transport level.
+                                        let mut payloads = Vec::new();
+                                        for len in [0, 1, 2, 4, 8, 16] {
+                                            let mut rng = thread_rng();
+                                            payloads.push((0..(len * 1024 * 1024)).map(|_| rng.gen()).collect::<Vec<u8>>());
+                                        }
+                                        let mut next_len = 0;
+                                        loop {
+                                            interval.tick(&clock).await;
 
-                                    loop {
-                                        interval.tick(&clock).await;
-                                        let mut rng = thread_rng();
-
-                                        for len_mb in [0, 1, 2, 4, 8, 16] {
-                                            let t1 = clock.now_utc().unix_timestamp_nanos();
-                                            let payload: Vec<u8> = payloads.entry(len_mb).or_insert_with(|| {
-                                                let len = len_mb * 1024 * 1024;
-                                                let payload: Vec<u8> = 
-                                                    (0..len).map(|_| rng.gen()).collect();
-
-                                                payload
-                                            }).clone();
-                                            let t2 = clock.now_utc().unix_timestamp_nanos();
-
-                                            tracing::warn!(target: "network",
-                                                "RTT took {} ms to construct or clone payload of size {} MB", (t2 - t1) / 1000000, len_mb);
+                                            let payload = payloads[next_len].clone();
+                                            next_len = (next_len + 1) % payloads.len();
 
                                             let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;
 
@@ -818,8 +811,8 @@ impl PeerActor {
                                             })));
                                         }
                                     }
-                                }
-                            }));
+                                }));
+                            }
 
                             // Refresh connection nonces but only if we're outbound. For inbound connection, the other party should
                             // take care of nonce refresh.

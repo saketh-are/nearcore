@@ -43,6 +43,13 @@ pub(crate) struct Store(schema::Store);
 ///                          exists one it belongs to.
 impl Store {
     /// Inserts (account_id,aa) to the AccountAnnouncements column.
+    #[tracing::instrument(
+        target = "network::store",
+        level = "trace",
+        "Store::set_account_announcement",
+        skip_all,
+        fields(%account_id)
+    )]
     pub fn set_account_announcement(
         &mut self,
         account_id: &AccountId,
@@ -67,6 +74,13 @@ impl Store {
     /// The name (even though technically correct) is misleading, because the <edges> do
     /// NOT have to constitute a CONNECTED component. I'm not fixing that because
     /// the whole routing table in the current form is scheduled for deprecation.
+    #[tracing::instrument(
+        target = "network::store",
+        level = "trace",
+        "Store::push_component",
+        skip_all,
+        fields(peers.len = peers.len(), edges.len = edges.len()),
+    )]
     pub fn push_component(
         &mut self,
         peers: &HashSet<PeerId>,
@@ -86,6 +100,13 @@ impl Store {
 
     /// Reads and deletes from DB the component that <peer_id> is a member of.
     /// Returns Ok(vec![]) if peer_id is not a member of any component.
+    #[tracing::instrument(
+        target = "network::store",
+        level = "trace",
+        "Store::pop_component",
+        skip_all,
+        fields(%peer_id),
+    )]
     pub fn pop_component(&mut self, peer_id: &PeerId) -> Result<Vec<Edge>, Error> {
         // Fetch the component assigned to the peer.
         let component = match self.0.get::<schema::PeerComponent>(peer_id).map_err(Error)? {
@@ -120,6 +141,12 @@ impl Store {
 
 // ConnectionStore storage.
 impl Store {
+    #[tracing::instrument(
+        target = "network::store",
+        level = "trace",
+        "Store::set_recent_outbound_connections",
+        skip_all
+    )]
     pub fn set_recent_outbound_connections(
         &mut self,
         recent_outbound_connections: &Vec<ConnectionInfo>,

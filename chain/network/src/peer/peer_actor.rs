@@ -79,7 +79,7 @@ const SYNC_LATEST_BLOCK_INTERVAL: time::Duration = time::Duration::seconds(60);
 const ACCOUNTS_DATA_FULL_SYNC_INTERVAL: time::Duration = time::Duration::minutes(10);
 
 /// How often to measure RTT
-const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(3);
+const MEASURE_RTT_INTERVAL: time::Duration = time::Duration::seconds(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionClosedEvent {
@@ -793,7 +793,8 @@ impl PeerActor {
                                         // them. It shouldn't impact network RTT measurements since
                                         // the payloads aren't being cached on the transport level.
                                         let mut payloads = Vec::new();
-                                        for len in [0, 1, 2, 4, 8, 16] {
+                                        for len in [2] {
+                                        // for len in [0, 1, 2, 4, 8, 16] {
                                             let mut rng = thread_rng();
                                             payloads.push((0..(len * 1024 * 1024)).map(|_| rng.gen()).collect::<Vec<u8>>());
                                         }

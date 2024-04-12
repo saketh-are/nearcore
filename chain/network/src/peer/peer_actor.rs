@@ -51,7 +51,6 @@ use parking_lot::Mutex;
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
 use std::cmp::min;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::net::SocketAddr;
@@ -802,9 +801,7 @@ impl PeerActor {
                                         loop {
                                             interval.tick(&clock).await;
 
-                                            let t1 = clock.now_utc().unix_timestamp_nanos();
                                             let payload = payloads[next_len].clone();
-                                            let t2 = clock.now_utc().unix_timestamp_nanos();
                                             next_len = (next_len + 1) % payloads.len();
 
                                             let timestamp = (clock.now_utc().unix_timestamp_nanos() / 1000000) as u64;

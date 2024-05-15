@@ -22,7 +22,7 @@ pub(crate) fn verify_nonce(clock: &time::Clock, nonce: u64) -> Result<(), Verify
     }
     match Edge::nonce_to_utc(nonce) {
         Err(err) => Err(VerifyNonceError::InvalidNonce(err)),
-        Ok(Some(nonce)) => {
+        Ok(nonce) => {
             let now = clock.now_utc();
             if (now - nonce).abs() >= EDGE_NONCE_MAX_TIME_DELTA {
                 metrics::EDGE_NONCE.with_label_values(&["error_timestamp_too_distant"]).inc();
@@ -31,10 +31,6 @@ pub(crate) fn verify_nonce(clock: &time::Clock, nonce: u64) -> Result<(), Verify
                 metrics::EDGE_NONCE.with_label_values(&["new_style"]).inc();
                 Ok(())
             }
-        }
-        Ok(None) => {
-            metrics::EDGE_NONCE.with_label_values(&["old_style"]).inc();
-            Ok(())
         }
     }
 }

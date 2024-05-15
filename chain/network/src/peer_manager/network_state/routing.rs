@@ -28,8 +28,11 @@ impl NetworkState {
         let nonce_lo = rtu.edges.iter().map(|e| e.nonce()).min().unwrap_or_default();
         let nonce_hi = rtu.edges.iter().map(|e| e.nonce()).max().unwrap_or_default();
 
-        tracing::error!(target:"stats", "Sending {} edges (nonce_lo={} nonce_hi={}) of {} total",
-            rtu.edges.len(), nonce_lo, nonce_hi, self.graph.load().edges.len());
+        let num_tombstones =
+            rtu.edges.iter().map(|e| if e.nonce() % 2 == 0 { 1 } else { 0 }).sum::<u64>();
+
+        tracing::error!(target:"stats", "Sending {} edges (nonce_lo={} nonce_hi={} num_tombstones={}) of {} total",
+            rtu.edges.len(), nonce_lo, nonce_hi, num_tombstones, self.graph.load().edges.len());
 
         let msg = Arc::new(PeerMessage::SyncRoutingTable(rtu));
         for conn in self.tier2.load().ready.values() {

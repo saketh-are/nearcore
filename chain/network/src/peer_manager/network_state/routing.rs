@@ -31,8 +31,17 @@ impl NetworkState {
         let num_tombstones =
             rtu.edges.iter().map(|e| if e.nonce() % 2 == 0 { 1 } else { 0 }).sum::<u64>();
 
-        tracing::error!(target:"stats", "Sending {} edges (nonce_lo={} nonce_hi={} num_tombstones={}) of {} total",
-            rtu.edges.len(), nonce_lo, nonce_hi, num_tombstones, self.graph.load().edges.len());
+        let num_oldstyle =
+            rtu.edges.iter().map(|e| if e.nonce() < 1660000000 { 1 } else { 0 }).sum::<u64>();
+
+        let num_oldstyle_non_tombstone = rtu
+            .edges
+            .iter()
+            .map(|e| if e.nonce() < 1660000000 && e.nonce() % 2 == 1 { 1 } else { 0 })
+            .sum::<u64>();
+
+        tracing::error!(target:"stats", "Sending {} edges (nonce_lo={} nonce_hi={} num_tombstones={} num_oldstyle={} num_oldstyle_non_tombstone={}) of {} total",
+            rtu.edges.len(), nonce_lo, nonce_hi, num_tombstones, num_oldstyle, num_oldstyle_non_tombstone, self.graph.load().edges.len());
 
         let msg = Arc::new(PeerMessage::SyncRoutingTable(rtu));
         for conn in self.tier2.load().ready.values() {

@@ -226,10 +226,8 @@ impl Edge {
 
     // Checks if edge was created before a given timestamp.
     pub fn is_edge_older_than(&self, utc_timestamp: time::Utc) -> bool {
-        Edge::nonce_to_utc(self.nonce()).is_ok_and(|nonce_timestamp| {
-            // Old-style nonce - for now, assume that they are always fresh.
-            nonce_timestamp < utc_timestamp
-        })
+        Edge::nonce_to_utc(self.nonce())
+            .is_ok_and(|nonce_timestamp| nonce_timestamp < utc_timestamp)
     }
 
     pub fn nonce_to_utc(nonce: u64) -> Result<time::Utc, InvalidNonceError> {

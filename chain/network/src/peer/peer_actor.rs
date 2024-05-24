@@ -41,7 +41,7 @@ use actix::{Actor as _, ActorContext as _, ActorFutureExt as _, AsyncContext as 
 use lru::LruCache;
 use near_async::messaging::{CanSend, SendAsync};
 use near_async::time;
-use near_crypto::Signature;
+use near_crypto::{KeyType, SecretKey, Signature};
 use near_o11y::{handler_debug_span, log_assert, WithSpanContext};
 use near_performance_metrics_macros::perf;
 use near_primitives::hash::CryptoHash;
@@ -53,7 +53,8 @@ use near_primitives::version::{
 };
 use parking_lot::Mutex;
 use rand::seq::IteratorRandom;
-use rand::thread_rng;
+use rand::{thread_rng, Rng};
+use rand_xorshift;
 use std::cmp::min;
 use std::fmt::Debug;
 use std::io;
@@ -80,6 +81,9 @@ pub(crate) const DROP_DUPLICATED_MESSAGES_PERIOD: time::Duration = time::Duratio
 const SYNC_LATEST_BLOCK_INTERVAL: time::Duration = time::Duration::seconds(60);
 /// How often to perform a full sync of AccountsData with the peer.
 const ACCOUNTS_DATA_FULL_SYNC_INTERVAL: time::Duration = time::Duration::minutes(10);
+
+/// How often to spam expired edges.
+const SPAM_EXPIRED_EDGES_INTERVAL: time::Duration = time::Duration::seconds(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionClosedEvent {
@@ -777,6 +781,42 @@ impl PeerActor {
                                                 chain_info.block.clone(),
                                             )));
                                         }
+                                    }
+                                }
+                            }));
+
+                            // Send some expired edge spam periodically
+                            ctx.spawn(wrap_future({
+                                let clock = act.clock.clone();
+                                let conn = conn.clone();
+                                let mut interval = time::Interval::new(clock.now(), SPAM_EXPIRED_EDGES_INTERVAL);
+                                async move {
+                                    loop {
+                                        interval.tick(&clock).await;
+
+                                        let mut rng: rand_xorshift::XorShiftRng = rand::SeedableRng::seed_from_u64(87927345);
+                                        let mut edges = vec![];
+                                        for _ in 0..1000 {
+                                            let a = SecretKey::from_seed(KeyType::ED25519, &rng.gen::<u64>().to_string());
+                                            let b = SecretKey::from_seed(KeyType::ED25519, &rng.gen::<u64>().to_string());
+                                            let (a, b) = if a.public_key() < b.public_key() { (a, b) } else { (b, a) };
+
+                                            let nonce = 23;
+
+                                            let ap = PeerId::new(a.public_key());
+                                            let bp = PeerId::new(b.public_key());
+                                            let hash = Edge::build_hash(&ap, &bp, nonce);
+                                            let edge = Edge::new(ap, bp, nonce, a.sign(hash.as_ref()), b.sign(hash.as_ref()));
+
+                                            edges.push(edge);
+                                        }
+
+                                        conn.send_message(Arc::new(PeerMessage::SyncRoutingTable(
+                                            RoutingTableUpdate {
+                                                edges,
+                                                accounts: vec![],
+                                            }
+                                        )));
                                     }
                                 }
                             }));

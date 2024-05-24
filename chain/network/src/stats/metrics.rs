@@ -242,6 +242,9 @@ pub(crate) static EDGE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     try_create_int_gauge("near_edge_total", "Total edges between peers (including removed ones).")
         .unwrap()
 });
+pub(crate) static EDGE_PRUNED: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_edge_pruned", "Count of edges pruned due to nonce expiry").unwrap()
+});
 
 pub(crate) static EDGE_TOMBSTONE_SENDING_SKIPPED: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(

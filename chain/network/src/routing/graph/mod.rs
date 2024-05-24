@@ -63,6 +63,7 @@ impl Inner {
         if let Some(prune_edges_after) = self.config.prune_edges_after {
             // Don't add edges that are older than the limit.
             if edge.is_edge_older_than(now - prune_edges_after) {
+                metrics::EDGE_PRUNED.inc();
                 return false;
             }
         }

@@ -47,9 +47,10 @@ pub(crate) async fn query(
                 return Err(Error::ErrTransactionStopped);
             }
             Some(e) => {
-                let mut addr = stun::xoraddr::XorMappedAddress::default();
-                addr.get_from(&e.event_body?)?;
-                addr.ip
+                let mut raddr = stun::xoraddr::XorMappedAddress::default();
+                raddr.get_from(&e.event_body?)?;
+                println!("Server at {:?} returned address {:?}", addr, raddr.ip);
+                raddr.ip
             }
         }
     };

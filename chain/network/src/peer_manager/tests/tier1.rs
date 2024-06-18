@@ -400,9 +400,11 @@ async fn stun_self_discovery() {
     tracing::info!(target:"test", "configure TIER1 self discovery to use 2 local STUN servers");
     let stun_server1 = stun::testonly::Server::new().await;
     let stun_server2 = stun::testonly::Server::new().await;
+    let addr = "stun.l.google.com:19302".to_string();
     let mut cfg = chain.make_config(rng);
     let vc = cfg.validator.as_mut().unwrap();
-    vc.proxies = config::ValidatorProxies::Dynamic(vec![stun_server1.addr(), stun_server2.addr()]);
+    vc.proxies =
+        config::ValidatorProxies::Dynamic(vec![stun_server1.addr(), stun_server2.addr(), addr]);
 
     tracing::info!(target:"test", "spawn a node and advertize AccountData.");
     let pm = start_pm(clock.clock(), TestDB::new(), cfg, chain.clone()).await;
@@ -410,6 +412,7 @@ async fn stun_self_discovery() {
     pm.set_chain_info(chain_info).await;
     let got = pm.tier1_advertise_proxies(&clock.clock()).await.unwrap();
     let want = vec![PeerAddr { peer_id: pm.cfg.node_id(), addr: *pm.cfg.node_addr.unwrap() }];
+    println!("{:?} {:?}", want, got.proxies);
     assert_eq!(want, got.proxies);
 
     tracing::info!(target:"test", "close the stun servers");

@@ -68,6 +68,9 @@ pub const MAX_STATE_PART_REQUEST: u64 = 16;
 /// Number of state parts already requested stored as pending.
 /// This number should not exceed MAX_STATE_PART_REQUEST times (number of peers in the network).
 pub const MAX_PENDING_PART: u64 = MAX_STATE_PART_REQUEST * 10000;
+/// A node with external storage configured first tries to obtain state parts from peers.
+/// For each part, it will make this many attempts before getting it from external storage.
+pub const MAX_REQUESTS_TO_PEERS_PER_PART_IF_EXTERNAL_STORAGE_AVAILABLE: u64 = 16;
 /// Time limit per state dump iteration.
 /// A node must check external storage for parts to dump again once time is up.
 pub const STATE_DUMP_ITERATION_TIME_LIMIT_SECS: u64 = 300;
@@ -109,32 +112,27 @@ pub struct StateSyncGetFileResult {
     result: Result<StateSyncFileDownloadResult, String>,
 }
 
-/// How to retrieve the state data.
-enum StateSyncInner {
-    /// Request both the state header and state parts from the peers.
-    Peers {
-        /// Which parts were requested from which peer and when.
-        last_part_id_requested: HashMap<(PeerId, ShardId), PendingRequestStatus>,
-        /// Map from which part we requested to whom.
-        requested_target: lru::LruCache<(u64, CryptoHash), PeerId>,
-    },
-    /// Requests the state header from peers but gets the state parts from an
-    /// external storage.
-    External {
-        /// Chain ID.
-        chain_id: String,
-        /// This semaphore imposes a restriction on the maximum number of simultaneous downloads
-        semaphore: Arc<tokio::sync::Semaphore>,
-        /// Connection to the external storage.
-        external: ExternalConnection,
-    },
+struct StateSyncExternal {
+    /// Chain ID.
+    chain_id: String,
+    /// This semaphore imposes a restriction on the maximum number of simultaneous downloads
+    semaphore: Arc<tokio::sync::Semaphore>,
+    /// Connection to the external storage.
+    external: ExternalConnection,
 }
 
 /// Helper to track state sync.
 pub struct StateSync {
     clock: Clock,
-    /// How to retrieve the state data.
-    inner: StateSyncInner,
+
+    /// Which parts were requested from which peer and when.
+    last_part_id_requested: HashMap<(PeerId, ShardId), PendingRequestStatus>,
+
+    /// Map from which part we requested to whom.
+    requested_target: lru::LruCache<(u64, CryptoHash), PeerId>,
+
+    /// External storage, if configured.
+    external: Option<StateSyncExternal>,
 
     /// Is used for communication with the peers.
     network_adapter: PeerManagerAdapter,
@@ -167,13 +165,10 @@ impl StateSync {
         sync_config: &SyncConfig,
         catchup: bool,
     ) -> Self {
-        let inner = match sync_config {
-            SyncConfig::Peers => StateSyncInner::Peers {
-                last_part_id_requested: Default::default(),
-                requested_target: lru::LruCache::new(
-                    NonZeroUsize::new(MAX_PENDING_PART as usize).unwrap(),
-                ),
-            },
+        let external = match sync_config {
+            SyncConfig::Peers => {
+                None
+            }
             SyncConfig::ExternalStorage(ExternalStorageConfig {
                 location,
                 num_concurrent_requests,
@@ -205,17 +200,19 @@ impl StateSync {
                 } else {
                     *num_concurrent_requests
                 } as usize;
-                StateSyncInner::External {
+                Some(StateSyncExternal {
                     chain_id: chain_id.to_string(),
                     semaphore: Arc::new(tokio::sync::Semaphore::new(num_permits)),
                     external,
-                }
+                })
             }
         };
         let (tx, rx) = channel::<StateSyncGetFileResult>();
         StateSync {
             clock,
-            inner,
+            last_part_id_requested: Default::default(),
+            requested_target: lru::LruCache::new(NonZeroUsize::new(MAX_PENDING_PART as usize).unwrap()),
+            external,
             network_adapter,
             timeout,
             state_parts_apply_results: HashMap::new(),
@@ -489,58 +486,23 @@ impl StateSync {
         shard_id: ShardId,
         sync_hash: CryptoHash,
     ) {
-        match &mut self.inner {
-            StateSyncInner::Peers { last_part_id_requested, requested_target } => {
-                let key = (part_id, sync_hash);
-                // Check that it came from the target that we requested it from.
-                if let Some(target) = requested_target.get(&key) {
-                    if last_part_id_requested.get_mut(&(target.clone(), shard_id)).map_or(
-                        false,
-                        |request| {
-                            request.missing_parts = request.missing_parts.saturating_sub(1);
-                            request.missing_parts == 0
-                        },
-                    ) {
-                        last_part_id_requested.remove(&(target.clone(), shard_id));
-                    }
+        let key = (part_id, sync_hash);
+        // Check that it came from the target that we requested it from.
+        if let Some(target) = self.requested_target.get(&key) {
+            if self.last_part_id_requested.get_mut(&(target.clone(), shard_id)).map_or(
+                false,
+                |request| {
+                    request.missing_parts = request.missing_parts.saturating_sub(1);
+                    request.missing_parts == 0
+                },
+            ) {
+                self.last_part_id_requested.remove(&(target.clone(), shard_id));
+            }
 
-                    self.network_adapter.send(StateSyncEvent::StatePartReceived (
-                        shard_id, part_id
-                    ));
-                }
-            }
-            StateSyncInner::External { .. } => {
-                // It is possible that we have previously made peer requests for this part
-                // before falling back to the External host.
-                self.network_adapter.send(StateSyncEvent::StatePartReceived (
-                    shard_id, part_id
-                ));
-            }
+            self.network_adapter.send(StateSyncEvent::StatePartReceived (
+                shard_id, part_id
+            ));
         }
-    }
-
-    /// Avoids peers that already have outstanding requests for parts.
-    fn select_peers(
-        &mut self,
-        highest_height_peers: &[HighestHeightPeerInfo],
-        shard_id: ShardId,
-    ) -> Result<Vec<PeerId>, near_chain::Error> {
-        let peers: Vec<PeerId> =
-            highest_height_peers.iter().map(|peer| peer.peer_info.id.clone()).collect();
-        let res = match &mut self.inner {
-            StateSyncInner::Peers { last_part_id_requested, .. } => {
-                last_part_id_requested.retain(|_, request| !request.expired());
-                peers
-                    .into_iter()
-                    .filter(|peer| {
-                        // If we still have a pending request from this node - don't add another one.
-                        !last_part_id_requested.contains_key(&(peer.clone(), shard_id))
-                    })
-                    .collect::<Vec<_>>()
-            }
-            StateSyncInner::External { .. } => peers,
-        };
-        Ok(res)
     }
 
     /// Returns new ShardSyncDownload if successful, otherwise returns given shard_sync_download
@@ -554,23 +516,21 @@ impl StateSync {
         runtime_adapter: Arc<dyn RuntimeAdapter>,
         state_parts_future_spawner: &dyn FutureSpawner,
     ) -> Result<(), near_chain::Error> {
-        let mut possible_targets = vec![];
-        match self.inner {
-            StateSyncInner::Peers { .. } => {
-                possible_targets = self.select_peers(highest_height_peers, shard_id)?;
-                if possible_targets.is_empty() {
-                    tracing::debug!(target: "sync", "Can't request a state header: No possible targets");
-                    // In most cases it means that all the targets are currently busy (that we have a pending request with them).
-                    return Ok(());
-                }
-            }
-            // We do not need to select a target for external storage.
-            StateSyncInner::External { .. } => {}
-        }
-
         // Downloading strategy starts here
         match shard_sync_download.status {
             ShardSyncStatus::StateDownloadHeader => {
+                // If no external storage is configured, we have to request headers from our peers
+                let possible_targets = match self.external {
+                    Some(_) => vec![],
+                    None => {
+                        if highest_height_peers.is_empty() {
+                            tracing::debug!(target: "sync", "Can't request a state header: No possible targets");
+                            return Ok(());
+                        }
+                        highest_height_peers.iter().map(|peer| peer.peer_info.id.clone()).collect()
+                    }
+                };
+
                 self.request_shard_header(
                     chain,
                     shard_id,
@@ -584,7 +544,6 @@ impl StateSync {
                 self.request_shard_parts(
                     shard_id,
                     sync_hash,
-                    possible_targets,
                     shard_sync_download,
                     chain,
                     runtime_adapter,
@@ -608,49 +567,46 @@ impl StateSync {
         state_parts_future_spawner: &dyn FutureSpawner,
     ) {
         let header_download = new_shard_sync_download.get_header_download_mut().unwrap();
-        match &mut self.inner {
-            StateSyncInner::Peers { .. } => {
-                let peer_id = possible_targets.choose(&mut thread_rng()).cloned().unwrap();
-                tracing::debug!(target: "sync", ?peer_id, shard_id, ?sync_hash, ?possible_targets, "request_shard_header");
-                assert!(header_download.run_me.load(Ordering::SeqCst));
-                header_download.run_me.store(false, Ordering::SeqCst);
-                header_download.state_requests_count += 1;
-                header_download.last_target = Some(peer_id.clone());
-                let run_me = header_download.run_me.clone();
-                near_performance_metrics::actix::spawn(
-                    std::any::type_name::<Self>(),
-                    self.network_adapter
-                        .send_async(PeerManagerMessageRequest::NetworkRequests(
-                            NetworkRequests::StateRequestHeader { shard_id, sync_hash, peer_id },
-                        ))
-                        .then(move |result| {
-                            if let Ok(NetworkResponses::RouteNotFound) =
-                                result.map(|f| f.as_network_response())
-                            {
-                                // Send a StateRequestHeader on the next iteration
-                                run_me.store(true, Ordering::SeqCst);
-                            }
-                            future::ready(())
-                        }),
-                );
-            }
-            StateSyncInner::External { chain_id, external, .. } => {
-                let sync_block_header = chain.get_block_header(&sync_hash).unwrap();
-                let epoch_id = sync_block_header.epoch_id();
-                let epoch_info = chain.epoch_manager.get_epoch_info(epoch_id).unwrap();
-                let epoch_height = epoch_info.epoch_height();
-                request_header_from_external_storage(
-                    header_download,
-                    shard_id,
-                    sync_hash,
-                    epoch_id,
-                    epoch_height,
-                    &chain_id.clone(),
-                    external.clone(),
-                    state_parts_future_spawner,
-                    self.state_parts_mpsc_tx.clone(),
-                );
-            }
+        if let Some(StateSyncExternal { chain_id, external, .. }) = &self.external {
+            let sync_block_header = chain.get_block_header(&sync_hash).unwrap();
+            let epoch_id = sync_block_header.epoch_id();
+            let epoch_info = chain.epoch_manager.get_epoch_info(epoch_id).unwrap();
+            let epoch_height = epoch_info.epoch_height();
+            request_header_from_external_storage(
+                header_download,
+                shard_id,
+                sync_hash,
+                epoch_id,
+                epoch_height,
+                &chain_id.clone(),
+                external.clone(),
+                state_parts_future_spawner,
+                self.state_parts_mpsc_tx.clone(),
+            );
+        } else {
+            let peer_id = possible_targets.choose(&mut thread_rng()).cloned().unwrap();
+            tracing::debug!(target: "sync", ?peer_id, shard_id, ?sync_hash, ?possible_targets, "request_shard_header");
+            assert!(header_download.run_me.load(Ordering::SeqCst));
+            header_download.run_me.store(false, Ordering::SeqCst);
+            header_download.state_requests_count += 1;
+            header_download.last_target = Some(peer_id.clone());
+            let run_me = header_download.run_me.clone();
+            near_performance_metrics::actix::spawn(
+                std::any::type_name::<Self>(),
+                self.network_adapter
+                .send_async(PeerManagerMessageRequest::NetworkRequests(
+                        NetworkRequests::StateRequestHeader { shard_id, sync_hash, peer_id },
+                ))
+                .then(move |result| {
+                    if let Ok(NetworkResponses::RouteNotFound) =
+                        result.map(|f| f.as_network_response())
+                    {
+                        // Send a StateRequestHeader on the next iteration
+                        run_me.store(true, Ordering::SeqCst);
+                    }
+                    future::ready(())
+                }),
+            );
         }
     }
 
@@ -659,7 +615,6 @@ impl StateSync {
         &mut self,
         shard_id: ShardId,
         sync_hash: CryptoHash,
-        possible_targets: Vec<PeerId>,
         new_shard_sync_download: &mut ShardSyncDownload,
         chain: &Chain,
         runtime_adapter: Arc<dyn RuntimeAdapter>,
@@ -667,66 +622,21 @@ impl StateSync {
     ) {
         // Iterate over all parts that needs to be requested (i.e. download.run_me is true).
         // Parts are ordered such that its index match its part_id.
-        match &mut self.inner {
-            StateSyncInner::Peers { last_part_id_requested, requested_target } => {
-                // We'll select all the 'highest' peers + validators as candidates (excluding those that gave us timeout in the past).
-                // And for each one of them, we'll ask for up to 16 (MAX_STATE_PART_REQUEST) parts.
-                let possible_targets_sampler =
-                    SamplerLimited::new(possible_targets, MAX_STATE_PART_REQUEST);
+        let mut requests_sent = 0;
+        for (part_id, download) in parts_to_fetch(new_shard_sync_download) {
+            if download.state_requests_count >= MAX_REQUESTS_TO_PEERS_PER_PART_IF_EXTERNAL_STORAGE_AVAILABLE
+                && self.external.is_some() && self.external.unwrap().semaphore.available_permits() > 0 {
+                    let { chain_id, semaphore, external } = &self.external.unwrap();
 
-                // For every part that needs to be requested it is selected one
-                // peer (target) randomly to request the part from.
-                // IMPORTANT: here we use 'zip' with possible_target_sampler -
-                // which is limited. So at any moment we'll not request more
-                // than possible_targets.len() * MAX_STATE_PART_REQUEST parts.
-                for ((part_id, download), target) in
-                    parts_to_fetch(new_shard_sync_download).zip(possible_targets_sampler)
-                {
-                    // In flat storage snapshots are indexed according to the hash of the second to
-                    // last block in the epoch. When performing state sync the sync hash is defined
-                    // as the hash of the first block after the epoch. The request sent to the
-                    // network adapater needs to include the sync_prev_prev_hash so that a peer
-                    // hosting the correct snapshot can be selected.
-                    // TODO(saketh): consider whether we can unify things in a cleaner way
-                    if let Ok(header) = chain.get_block_header(&sync_hash) {
-                        if let Ok(prev_header) = chain.get_block_header(&header.prev_hash()) {
-                            let sync_prev_prev_hash = prev_header.prev_hash();
+                    let sync_block_header = chain.get_block_header(&sync_hash).unwrap();
+                    let epoch_id = sync_block_header.epoch_id();
+                    let epoch_info = chain.epoch_manager.get_epoch_info(epoch_id).unwrap();
+                    let epoch_height = epoch_info.epoch_height();
 
-                            sent_request_part(
-                                self.clock.clone(),
-                                target.clone(),
-                                part_id,
-                                shard_id,
-                                sync_hash,
-                                last_part_id_requested,
-                                requested_target,
-                                self.timeout,
-                            );
+                    let shard_state_header = chain.get_state_header(shard_id, sync_hash).unwrap();
+                    let state_root = shard_state_header.chunk_prev_state_root();
+                    let state_num_parts = shard_state_header.num_state_parts();
 
-                            request_part_from_peers(
-                                part_id,
-                                target,
-                                download,
-                                shard_id,
-                                sync_hash,
-                                *sync_prev_prev_hash,
-                                &self.network_adapter,
-                            );
-                        }
-                    }
-                }
-            }
-            StateSyncInner::External { chain_id, semaphore, external } => {
-                let sync_block_header = chain.get_block_header(&sync_hash).unwrap();
-                let epoch_id = sync_block_header.epoch_id();
-                let epoch_info = chain.epoch_manager.get_epoch_info(epoch_id).unwrap();
-                let epoch_height = epoch_info.epoch_height();
-
-                let shard_state_header = chain.get_state_header(shard_id, sync_hash).unwrap();
-                let state_root = shard_state_header.chunk_prev_state_root();
-                let state_num_parts = shard_state_header.num_state_parts();
-
-                for (part_id, download) in parts_to_fetch(new_shard_sync_download) {
                     request_part_from_external_storage(
                         part_id,
                         download,
@@ -743,8 +653,36 @@ impl StateSync {
                         state_parts_future_spawner,
                         self.state_parts_mpsc_tx.clone(),
                     );
-                    if semaphore.available_permits() == 0 {
-                        break;
+            } else {
+                // The request sent to the network adapater needs to include the sync_prev_prev_hash
+                // so that a peer hosting the correct snapshot can be selected.
+                // TODO(saketh): consider whether we can unify things in a cleaner way
+                if let Ok(header) = chain.get_block_header(&sync_hash) {
+                    if let Ok(prev_header) = chain.get_block_header(&header.prev_hash()) {
+                        let sync_prev_prev_hash = prev_header.prev_hash();
+
+                        sent_request_part(
+                            self.clock.clone(),
+                            target.clone(),
+                            part_id,
+                            shard_id,
+                            sync_hash,
+                            self.last_part_id_requested,
+                            self.requested_target,
+                            self.timeout,
+                        );
+
+                        request_part_from_peers(
+                            part_id,
+                            target,
+                            download,
+                            shard_id,
+                            sync_hash,
+                            *sync_prev_prev_hash,
+                            &self.network_adapter,
+                        );
+
+                        requests_sent += 1;
                     }
                 }
             }

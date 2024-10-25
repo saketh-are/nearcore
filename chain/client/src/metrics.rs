@@ -488,7 +488,7 @@ pub(crate) static STATE_SYNC_P2P_REQUEST_DELAY: LazyLock<HistogramVec> =
             "near_state_sync_p2p_request_delay_sec",
             "Latency of state requests to peers",
             &["shard_id", "type"],
-            Some(exponential_buckets(0.001, 300.0, 20).unwrap()),
+            Some(exponential_buckets(0.001, 2.0, 20).unwrap()),
         )
         .unwrap()
     });

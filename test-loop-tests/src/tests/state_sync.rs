@@ -17,7 +17,7 @@ use near_primitives::types::{
 };
 use near_primitives::version::{PROTOCOL_VERSION, ProtocolFeature};
 
-use crate::setup::builder::TestLoopBuilder;
+use crate::setup::builder::{TestLoopBuilder, NodeStateBuilder};
 use crate::setup::drop_condition::DropCondition;
 use crate::setup::env::TestLoopEnv;
 use crate::setup::state::NodeExecutionData;
@@ -366,7 +366,22 @@ fn run_test(state: TestState) {
         first_epoch_time,
     );
 
-    produce_chunks(&mut env, accounts, skip_block_height);
+    produce_chunks(&mut env, accounts.clone(), skip_block_height);
+
+    // Add new node which will sync all shards
+    let genesis = env.shared_state.genesis.clone();
+    let tempdir_path = env.shared_state.tempdir.path().to_path_buf();
+    let account_id: AccountId = "sync-from-scratch".parse().unwrap();
+    let new_node_state = NodeStateBuilder::new(genesis, tempdir_path)
+        .account_id(account_id.clone())
+        .config_modifier(move |config| {
+            config.tracked_shards = vec![ShardId::new(0)];
+        })
+        .build();
+    env.add_node(account_id.as_str(), new_node_state);
+
+    produce_chunks(&mut env, accounts, None);
+
     env.shutdown_and_drain_remaining_events(Duration::seconds(3));
 }
 

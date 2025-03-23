@@ -310,7 +310,10 @@ fn produce_chunks(
                     .map(|test_data| &data.get(&test_data.client_sender.actor_handle()).client)
                     .collect_vec();
                 let new_tip = get_smallest_height_head(&clients);
-                new_tip.height != tip.height
+                if new_tip.height < tip.height {
+                    tracing::debug!("zxcv observed backslide {} from {}", new_tip.height, tip.height);
+                }
+                new_tip.height > tip.height
             },
             timeout,
         );
@@ -327,6 +330,10 @@ fn produce_chunks(
         let header = clients[0].chain.get_block_header(&tip.last_block_hash).unwrap();
         tracing::debug!("chunk mask for #{} {:?}", header.height(), header.chunk_mask());
 
+        if skip_block_height.is_some_and(|skip_block_height| header.height() > skip_block_height + 3) {
+            break;
+        }
+
         if new_tip.epoch_id != tip.epoch_id {
             epoch_id_switches += 1;
             if epoch_id_switches > 3 {
@@ -337,6 +344,16 @@ fn produce_chunks(
             }
         }
         tip = new_tip;
+
+        let clients = env
+            .node_datas
+            .iter()
+            .map(|test_data| {
+                &env.test_loop.data.get(&test_data.client_sender.actor_handle()).client
+            })
+            .collect_vec();
+        let header = clients[0].chain.get_block_header(&tip.last_block_hash).unwrap();
+        tracing::debug!("zxcv Tip is now at #{} {} {:?}", header.height(), tip.last_block_hash, tip.epoch_id);
     }
 
     if let Some(skip_block_height) = skip_block_height {
@@ -368,21 +385,37 @@ fn run_test(state: TestState) {
 
     produce_chunks(&mut env, accounts.clone(), skip_block_height);
 
-    // Add new node which will sync all shards
+    // Add new node which will sync all shards from scratch.
+    // It is specifically introduced here so that the skipped block height,
+    // if defined, occurs around the sync height.
+    if let Some(skip_block_height) = skip_block_height {
+        let handle = env.node_datas[0].client_sender.actor_handle();
+        let client = &env.test_loop.data.get(&handle).client;
+        let tip = client.chain.head().unwrap();
+        let header = client.chain.get_block_header(&tip.last_block_hash).unwrap();
+    }
     let genesis = env.shared_state.genesis.clone();
     let tempdir_path = env.shared_state.tempdir.path().to_path_buf();
     let account_id: AccountId = "sync-from-scratch".parse().unwrap();
     let new_node_state = NodeStateBuilder::new(genesis, tempdir_path)
         .account_id(account_id.clone())
         .config_modifier(move |config| {
-            config.tracked_shards = vec![ShardId::new(0)];
+            config.state_sync_enabled = true;
+            config.block_fetch_horizon = 5;
+            config.tracked_shards = vec![
+                ShardId::new(0),
+                ShardId::new(1),
+                ShardId::new(2),
+                ShardId::new(3),
+                ShardId::new(4),
+            ];
         })
         .build();
     env.add_node(account_id.as_str(), new_node_state);
 
-    produce_chunks(&mut env, accounts, None);
+    produce_chunks(&mut env, accounts.clone(), None);
 
-    env.shutdown_and_drain_remaining_events(Duration::seconds(3));
+    env.shutdown_and_drain_remaining_events(Duration::seconds(30));
 }
 
 #[derive(Debug)]
@@ -659,6 +692,8 @@ fn slow_test_state_sync_fork_after_sync() {
 fn slow_test_state_sync_fork_before_sync() {
     init_test_logger();
 
+    //for skip_height in -5..5 {
+    //tracing::debug!("ERROR TRYING {skip_height}");
     let params = StateSyncTest {
         num_validators: 6,
         num_block_producer_seats: 6,
@@ -666,7 +701,7 @@ fn slow_test_state_sync_fork_before_sync() {
         num_shards: 5,
         generate_shard_accounts: true,
         chunks_produced: &[],
-        skip_block_sync_height_delta: Some(-1),
+        skip_block_sync_height_delta: Some(-1), // Some(skip_height),
         extra_node_shard_schedule: None,
     };
     let state = setup_initial_blockchain(
@@ -684,6 +719,7 @@ fn slow_test_state_sync_fork_before_sync() {
         &params.extra_node_shard_schedule,
     );
     run_test(state);
+    //}
 }
 
 fn await_sync_hash(env: &mut TestLoopEnv) -> CryptoHash {

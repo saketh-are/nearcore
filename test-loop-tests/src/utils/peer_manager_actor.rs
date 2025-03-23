@@ -350,6 +350,7 @@ fn network_message_to_view_client_handler(
             None
         }
         NetworkRequests::BlockRequest { hash, peer_id } => {
+            tracing::debug!("zxcv handle BlockRequest {} {} {}", my_account_id, hash, peer_id);
             let responder = shared_state.senders_for_account(&my_account_id).client_sender.clone();
             let future = shared_state
                 .senders_for_peer(&peer_id)

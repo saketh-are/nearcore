@@ -646,6 +646,7 @@ impl Handler<SetNetworkInfo> for ClientActorInner {
         // SetNetworkInfo is a large message. Avoid printing it at the `debug` verbosity.
         let SetNetworkInfo(network_info) = msg;
         self.network_info = network_info;
+        tracing::debug!("syncing_info: updated the network info");
     }
 }
 
@@ -1536,6 +1537,9 @@ impl ClientActorInner {
             .iter()
             .filter(|p| !self.client.chain.is_block_invalid(&p.highest_block_hash))
             .collect();
+        if is_syncing {
+            tracing::debug!("syncing_info {}/{}", eligible_peers.len(), self.network_info.highest_height_peers.len());
+        }
         metrics::PEERS_WITH_INVALID_HASH
             .set(self.network_info.highest_height_peers.len() as i64 - eligible_peers.len() as i64);
         let peer_info = if let Some(peer_info) = eligible_peers.choose(&mut thread_rng()) {
@@ -1547,6 +1551,8 @@ impl ClientActorInner {
         let peer_id = peer_info.peer_info.id.clone();
         let shutdown_height = self.client.config.expected_shutdown.get().unwrap_or(u64::MAX);
         let highest_height = peer_info.highest_block_height.min(shutdown_height);
+
+        tracing::debug!("syncing_info {is_syncing} {} {shutdown_height} {highest_height}", peer_info.highest_block_height);
 
         if is_syncing {
             if highest_height <= head.height {

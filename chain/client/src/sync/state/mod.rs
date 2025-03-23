@@ -304,6 +304,7 @@ impl StateSync {
     }
 }
 
+#[derive(Debug)]
 pub enum StateSyncResult {
     /// State sync still in progress. No action needed by the caller.
     InProgress,

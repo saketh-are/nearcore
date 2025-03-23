@@ -257,6 +257,7 @@ impl Chain {
         let header = self.get_block_header(block_hash)?;
         let protocol_version = self.epoch_manager.get_epoch_protocol_version(header.epoch_id())?;
         if ProtocolFeature::CurrentEpochStateSync.enabled(protocol_version) {
+            tracing::debug!("update_sync_status: about to enter get_current_epoch_sync_hash");
             self.chain_store.get_current_epoch_sync_hash(header.epoch_id())
         } else {
             // In the first epoch, it doesn't make sense to sync state to the previous epoch.
@@ -311,17 +312,19 @@ impl Chain {
             tracing::warn!(target: "sync", ?block_hash, "get_extra_sync_block_hashes: Cannot find the min block height");
             return vec![];
         };
+        tracing::debug!("get_extra_sync_block_hashes: {block_hash} {} {min_height_included}", block.header().height());
 
         let mut extra_block_hashes = vec![];
         let mut next_hash = *block.header().prev_hash();
         loop {
+            tracing::debug!("get_extra_sync_block_hashes: {next_hash}");
             let next_header = self.get_block_header(&next_hash);
             let Ok(next_header) = next_header else {
                 tracing::error!(target: "sync", hash=?next_hash, "get_extra_sync_block_hashes: Cannot get block header");
                 break;
             };
 
-            if next_header.height() + 1 < min_height_included {
+            if next_header.height() + 4 < min_height_included {
                 break;
             }
 

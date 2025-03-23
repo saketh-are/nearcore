@@ -1739,7 +1739,11 @@ impl Chain {
         // blocks at sync hash, prev hash and prev prev hash.
         // Due to epoch finalization restrictions these blocks have consecutive heights,
         // so the height of the prev prev block is sync_height - 2.
-        let mut new_tail = prev_block.header().height().saturating_sub(1);
+        let mut new_tail = prev_block.header().prev_height().unwrap();
+        tracing::debug!("fixed tail definition {} {}",
+            prev_block.header().height().saturating_sub(1),
+            prev_block.header().prev_height().unwrap(),
+        );
 
         // In case there are missing chunks we need to keep more than just the
         // sync hash block. The logic below adjusts the new_tail so that every
@@ -1751,9 +1755,14 @@ impl Chain {
             .map(|chunk| chunk.height_included())
             .min()
             .unwrap();
+        let min_height_included_block = self.get_block_by_height(min_height_included)?;
 
         tracing::debug!(target: "sync", ?min_height_included, ?new_tail, "adjusting tail for missing chunks");
-        new_tail = std::cmp::min(new_tail, min_height_included.saturating_sub(1));
+        new_tail = std::cmp::min(new_tail, min_height_included_block.header().prev_height().unwrap());
+        tracing::debug!("fixed tail definition B {} {}",
+            min_height_included.saturating_sub(1),
+            min_height_included_block.header().prev_height().unwrap(),
+        );
 
         // In order to find the right new_chunk_tail we need to find the minimum
         // of chunk height_created for chunks in the new tail block.

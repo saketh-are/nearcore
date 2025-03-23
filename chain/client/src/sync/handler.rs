@@ -24,7 +24,10 @@ use std::sync::Arc;
 // result is an error this macro will log it and return from the function.
 #[macro_export]
 macro_rules! unwrap_and_report_state_sync_result (($obj: expr) => (match $obj {
-    Ok(v) => v,
+    Ok(v) => {
+        tracing::debug!("Sync: {:?}", v);
+        v
+    }
     Err(err) => {
         tracing::error!(target: "sync", "Sync: Unexpected error: {}", err);
         return None;
@@ -92,6 +95,7 @@ impl SyncHandler {
         signer: &Option<Arc<ValidatorSigner>>,
         apply_chunks_done_sender: Option<near_async::messaging::Sender<ApplyChunksDoneMessage>>,
     ) -> Option<SyncHandlerRequest> {
+        tracing::debug!("entered handle_sync_needed");
         // Run epoch sync first; if this is applicable then nothing else is.
         let epoch_sync_result = self.epoch_sync.run(
             &mut self.sync_status,
@@ -101,6 +105,7 @@ impl SyncHandler {
         );
         unwrap_and_report_state_sync_result!(epoch_sync_result);
 
+        tracing::debug!("handle_sync_needed {} {:?}", highest_height, highest_height_peers);
         // Run header sync as long as there are headers to catch up.
         let header_sync_result = self.header_sync.run(
             &mut self.sync_status,
@@ -120,14 +125,20 @@ impl SyncHandler {
         if !should_state_sync {
             return None;
         }
+        tracing::debug!("decided we should state sync");
         let update_sync_status_result = self.update_sync_status(chain);
         unwrap_and_report_state_sync_result!(update_sync_status_result);
 
+        tracing::debug!("sync hash is about to be checked");
         let sync_hash = match &self.sync_status {
             SyncStatus::StateSync(s) => s.sync_hash,
             // sync hash isn't known yet. Return and try again later.
-            _ => return None,
+            _ => {
+                tracing::debug!("sync hash is not known yet");
+                return None;
+            }
         };
+        tracing::debug!("sync hash is {sync_hash}");
 
         let me = signer.as_ref().map(|x| x.validator_id().clone());
         let block_header = chain.get_block_header(&sync_hash);
@@ -142,6 +153,7 @@ impl SyncHandler {
 
         let blocks_to_request = self.request_sync_blocks(chain, block_header, highest_height_peers);
         let blocks_to_request = unwrap_and_report_state_sync_result!(blocks_to_request);
+        tracing::info!(target: "sync", "requesting blocks {:?}", blocks_to_request);
 
         let state_sync_status = match &mut self.sync_status {
             SyncStatus::StateSync(s) => s,
@@ -154,6 +166,7 @@ impl SyncHandler {
             tracing::debug!(target: "sync", "waiting for sync blocks");
             return Some(SyncHandlerRequest::NeedRequestBlocks(blocks_to_request));
         }
+        tracing::debug!(target: "sync", "got all sync blocks");
 
         let state_sync_result = self.state_sync.run(
             sync_hash,
@@ -187,13 +200,17 @@ impl SyncHandler {
 
     /// Update sync status to StateSync and reset data if needed.
     fn update_sync_status(&mut self, chain: &mut Chain) -> Result<(), near_chain::Error> {
+        tracing::debug!("update_sync_status: entered {:?}", self.sync_status);
         if let SyncStatus::StateSync(_) = self.sync_status {
             return Ok(());
         }
 
+        tracing::debug!("update_sync_status: about to find sync hash");
         let sync_hash = if let Some(sync_hash) = chain.find_sync_hash()? {
+            tracing::debug!("update_sync_status: {sync_hash}");
             sync_hash
         } else {
+            tracing::debug!("update_sync_status: failed to get sync_hash");
             return Ok(());
         };
         if !self.config.archive {

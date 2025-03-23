@@ -1048,7 +1048,7 @@ impl Client {
         match &res {
             Err(near_chain::Error::Orphan) => {
                 debug!(target: "chain", ?prev_hash, "Orphan error");
-                if !self.chain.is_orphan(&prev_hash) {
+                if !self.chain.is_orphan(&prev_hash) { // && !was_requested {
                     debug!(target: "chain", "not orphan");
                     self.request_block(prev_hash, peer_id)
                 }

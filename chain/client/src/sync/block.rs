@@ -213,6 +213,7 @@ impl BlockSync {
 
         let mut num_requests = 0;
         for (height, hash) in requests {
+            tracing::debug!("zxcv requesting! {} {} {}", height, hash, gc_stop_height);
             let request_from_archival = self.archive && height < gc_stop_height;
             // Assume that heads of `highest_height_peers` are ahead of the blocks we're requesting.
             let peer = if request_from_archival {

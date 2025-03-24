@@ -321,7 +321,8 @@ impl Chain {
                 break;
             };
 
-            if next_header.height() + 1 < min_height_included {
+            // TODO: properly fix the logic for this entire function.
+            if next_header.height() + 4 < min_height_included {
                 break;
             }
 

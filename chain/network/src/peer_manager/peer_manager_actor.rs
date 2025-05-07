@@ -87,6 +87,8 @@ const PREFER_PREVIOUSLY_CONNECTED_PEER: f64 = 0.6;
 pub(crate) const UPDATE_CONNECTION_STORE_INTERVAL: time::Duration = time::Duration::minutes(1);
 /// How often to poll the NetworkState for closed connections we'd like to re-establish.
 pub(crate) const POLL_CONNECTION_STORE_INTERVAL: time::Duration = time::Duration::minutes(1);
+/// (debug) How often to dump all the validator IPs.
+pub(crate) const DUMP_VALIDATOR_IPS_INTERVAL: time::Duration = time::Duration::seconds(10);
 
 /// The length of time that a Tier3 connection is allowed to idle before it is stopped
 const TIER3_IDLE_TIMEOUT: time::Duration = time::Duration::seconds(15);
@@ -342,6 +344,37 @@ impl PeerManagerActor {
                                 #[cfg(test)]
                                 state.config.event_sink.send(Event::ReconnectLoopSpawned(peer_info));
                             }
+                        }
+                    }
+                });
+
+                // Periodically print all known validator IPs.
+                arbiter.spawn({
+                    let clock = clock.clone();
+                    let state = state.clone();
+                    let mut interval = time::Interval::new(clock.now(), DUMP_VALIDATOR_IPS_INTERVAL);
+                    async move {
+                        loop {
+                            interval.tick(&clock).await;
+
+                            /*tracing::info!("AccountData Validator PublicKey to PeerId Mapping:");
+                            state.accounts_data.load().data.iter().for_each(|(_, v)| {
+                                tracing::info!("{}, {}", v.account_data.public_key, v.account_data.data.peer_id);
+                            });*/
+
+                            tracing::info!("AnnounceAccounts validator AccountId to PeerId mapping:");
+                            state.account_announcements.get_announcements().iter().for_each(|a| {
+                                tracing::info!("{}, {}, {:?}", a.account_id, a.peer_id, a.epoch_id);
+                            });
+
+                            tracing::info!("PeerStore PeerId to Addr mapping:");
+                            state.peer_store.load().iter().for_each(|(peer_id, known_peer_state)| {
+                                tracing::info!("{}, {:?}, {:?}",
+                                    peer_id,
+                                    known_peer_state.peer_info.addr,
+                                    known_peer_state.peer_info.account_id
+                                );
+                            });
                         }
                     }
                 });
@@ -1395,6 +1428,7 @@ impl actix::Handler<GetDebugStatus> for PeerManagerActor {
                         peer_id: peer_id.clone(),
                         status: format!("{:?}", known_peer_state.status),
                         addr: format!("{:?}", known_peer_state.peer_info.addr),
+                        account_id: format!("{:?}", known_peer_state.peer_info.account_id),
                         first_seen: known_peer_state.first_seen.unix_timestamp(),
                         last_seen: known_peer_state.last_seen.unix_timestamp(),
                         last_attempt: known_peer_state.last_outbound_attempt.clone().map(

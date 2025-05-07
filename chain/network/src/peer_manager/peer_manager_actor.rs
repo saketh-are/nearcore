@@ -46,6 +46,10 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tracing::Instrument as _;
 
+ use near_primitives::types::AccountId;
+ use im::HashMap;
+ use std::net::SocketAddr;
+
 /// Ratio between consecutive attempts to establish connection with another peer.
 /// In the kth step node should wait `10 * EXPONENTIAL_BACKOFF_RATIO**k` milliseconds
 const EXPONENTIAL_BACKOFF_RATIO: f64 = 1.1;
@@ -353,27 +357,31 @@ impl PeerManagerActor {
                     let clock = clock.clone();
                     let state = state.clone();
                     let mut interval = time::Interval::new(clock.now(), DUMP_VALIDATOR_IPS_INTERVAL);
+
+                    let mut known_vdrs = HashSet::<AccountId>::new();
+                    let mut known_ips = HashMap::<AccountId, (PeerId, SocketAddr)>::new();
+
                     async move {
                         loop {
                             interval.tick(&clock).await;
 
-                            /*tracing::info!("AccountData Validator PublicKey to PeerId Mapping:");
-                            state.accounts_data.load().data.iter().for_each(|(_, v)| {
-                                tracing::info!("{}, {}", v.account_data.public_key, v.account_data.data.peer_id);
-                            });*/
+                            let peer_store = state.peer_store.load();
 
-                            tracing::info!("AnnounceAccounts validator AccountId to PeerId mapping:");
                             state.account_announcements.get_announcements().iter().for_each(|a| {
-                                tracing::info!("{}, {}, {:?}", a.account_id, a.peer_id, a.epoch_id);
+                                known_vdrs.insert(a.account_id.clone());
+
+                                if !known_ips.contains_key(&a.account_id) {
+                                    if let Some(peer_info) = peer_store.get(&a.peer_id) {
+                                        if let Some(addr) = peer_info.peer_info.addr {
+                                            known_ips.insert(a.account_id.clone(), (a.peer_id.clone(), addr));
+                                        }
+                                    }
+                                }
                             });
 
-                            tracing::info!("PeerStore PeerId to Addr mapping:");
-                            state.peer_store.load().iter().for_each(|(peer_id, known_peer_state)| {
-                                tracing::info!("{}, {:?}, {:?}",
-                                    peer_id,
-                                    known_peer_state.peer_info.addr,
-                                    known_peer_state.peer_info.account_id
-                                );
+                            tracing::info!("Validator IPs ({}/{}):", known_vdrs.len(), known_ips.len());
+                            known_ips.iter().for_each(|(account_id, (peer_id, addr))| {
+                                tracing::info!("{}, {:?}, {:?}", account_id, peer_id, addr);
                             });
                         }
                     }

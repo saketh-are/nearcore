@@ -35,6 +35,7 @@ use crate::types::{
 };
 use actix::fut::future::wrap_future;
 use actix::{Actor as _, ActorContext as _, ActorFutureExt as _, AsyncContext as _};
+use futures::future::join_all;
 use lru::LruCache;
 use near_async::messaging::{CanSend, SendAsync};
 use near_async::time;
@@ -1520,6 +1521,13 @@ impl PeerActor {
                 (aa, old.get(&id).map(|old| old.epoch_id))
             })
             .collect();
+
+        // Messing around
+        let handles: Vec<_> = (0..32)
+            .map(|_| network_state.client.send_async(AnnounceAccountRequest(accounts.clone())))
+            .collect();
+        join_all(handles).await;
+
         match network_state.client.send_async(AnnounceAccountRequest(accounts)).await {
             Ok(Err(ban_reason)) => conn.stop(Some(ban_reason)),
             Ok(Ok(accounts)) => network_state.add_accounts(accounts).await,

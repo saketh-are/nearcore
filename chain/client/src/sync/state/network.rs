@@ -50,7 +50,7 @@ struct PendingPeerRequestKey {
 }
 
 struct PendingPeerRequestValue {
-    peer_id: Option<PeerId>, // present for headers, not for parts
+    peer_id: PeerId,
     sender: oneshot::Sender<ShardStateSyncResponse>,
 }
 
@@ -76,7 +76,7 @@ impl StateSyncDownloadSourcePeerSharedState {
             return Err(near_chain::Error::Other("Unexpected state response".to_owned()));
         };
 
-        if request.peer_id.as_ref().is_some_and(|expecting_peer_id| expecting_peer_id != &peer_id) {
+        if request.peer_id != peer_id {
             return Err(near_chain::Error::Other(
                 "Unexpected state response (wrong sender)".to_owned(),
             ));
@@ -188,7 +188,7 @@ impl StateSyncDownloadSourcePeer {
             }
         };
 
-        let state_value = PendingPeerRequestValue { peer_id: Some(request_sent_to_peer), sender };
+        let state_value = PendingPeerRequestValue { peer_id: request_sent_to_peer, sender };
 
         // Ensures that the key is removed from the map of pending requests when this scope exits,
         // whether on success or timeout.

@@ -42,8 +42,10 @@ impl StateSyncDownloadSourceExternal {
             StateFileType::StateHeader => "header",
             StateFileType::StatePart { .. } => "part",
         };
+        tracing::debug!(target: "sync", "state_sync: downloading {} {:?} {} from cloud storage", shard_id, file_type, location);
         tokio::select! {
             _ = clock.sleep_until(deadline) => {
+                tracing::debug!(target: "sync", "state_sync: timeout getting {} {:?} {} from cloud storage", shard_id, file_type, location);
                 increment_download_count(shard_id, typ, "external", "timeout");
                 Err(near_chain::Error::Other("Timeout".to_owned()))
             }
@@ -54,6 +56,7 @@ impl StateSyncDownloadSourceExternal {
             result = fut => {
                 match result {
                     Err(err) => {
+                        tracing::debug!(target: "sync", %err, "state_sync: error getting {} {:?} {} from cloud storage", shard_id, file_type, location);
                         // A download error typically indicates that the file is not available yet. At the
                         // start of the epoch it takes a while for dumpers to populate the external storage
                         // with state files. This backoff period prevents spamming requests during that time.

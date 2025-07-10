@@ -70,12 +70,19 @@ impl StateSyncDownloadSourcePeerSharedState {
             },
         };
 
+        // TODO: Need to improve the way we record our pending requests so that neither case below
+        // can happen unless there is actually malicious behavior. We shouldn't be printing an
+        // error in case of a simple timeout.
+
         let Some(request) = self.pending_requests.get(&key) else {
-            tracing::debug!(target: "sync", "Received {:?} expecting {:?}", key, self.pending_requests.keys());
-            return Err(near_chain::Error::Other("Unexpected state response".to_owned()));
+            tracing::debug!(target: "sync", "state_sync: received {:?} from peer {}, expecting keys {:?}", key, peer_id, self.pending_requests.keys());
+            return Err(near_chain::Error::Other(
+                "Unexpected state response (no matching pending request)".to_owned(),
+            ));
         };
 
         if request.peer_id != peer_id {
+            tracing::debug!(target: "sync", "state_sync: received {:?} from peer {}, but requested it from peer {}", key, peer_id, request.peer_id);
             return Err(near_chain::Error::Other(
                 "Unexpected state response (wrong sender)".to_owned(),
             ));
@@ -181,8 +188,9 @@ impl StateSyncDownloadSourcePeer {
                 return Err(near_chain::Error::Other("No response".to_owned()));
             }
         };
+        tracing::debug!(target: "sync", "state_sync: sent request for {:?} to peer {}", key, request_sent_to_peer);
 
-        let state_value = PendingPeerRequestValue { peer_id: request_sent_to_peer, sender };
+        let state_value = PendingPeerRequestValue { peer_id: request_sent_to_peer.clone(), sender };
 
         // Ensures that the key is removed from the map of pending requests when this scope exits,
         // whether on success or timeout.
@@ -195,6 +203,7 @@ impl StateSyncDownloadSourcePeer {
         handle.set_status("Waiting for peer response");
         select! {
             _ = clock.sleep_until(deadline) => {
+                tracing::debug!(target: "sync", "state_sync: request timeout for {:?} from peer {}", key, request_sent_to_peer);
                 increment_download_count(key.shard_id, typ, "network", "timeout");
                 Err(near_chain::Error::Other("Timeout".to_owned()))
             }

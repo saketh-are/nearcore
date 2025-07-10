@@ -881,6 +881,14 @@ impl PeerManagerActor {
                 sync_prev_prev_hash,
                 part_id,
             } => {
+                {
+                    // Make peer requests fail fast 50% of the time for testing purposes
+                    let mut rng = thread_rng();
+                    if rng.gen_bool(0.5) {
+                        return NetworkResponses::RouteNotFound;
+                    }
+                }
+
                 // The node needs to include its own public address in the request
                 // so that the response can be sent over a direct Tier3 connection.
                 let Some(addr) = *self.state.my_public_addr.read() else {

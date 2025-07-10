@@ -72,21 +72,24 @@ impl StateSyncDownloadSourcePeerSharedState {
 
         // TODO: Need to improve the way we record our pending requests so that neither case below
         // can happen unless there is actually malicious behavior. We shouldn't be printing an
-        // error in case of a simple timeout.
+        // error in case of a simple timeout. Once that is fixed, it makes sense to log this at
+        // warn level.
 
         let Some(request) = self.pending_requests.get(&key) else {
-            tracing::debug!(target: "sync", "state_sync: received {:?} from peer {}, expecting keys {:?}", key, peer_id, self.pending_requests.keys());
+            tracing::warn!(target: "sync", "state_sync: received {:?} from peer {}, expecting keys {:?}", key, peer_id, self.pending_requests.keys());
             return Err(near_chain::Error::Other(
                 "Unexpected state response (no matching pending request)".to_owned(),
             ));
         };
 
         if request.peer_id != peer_id {
-            tracing::debug!(target: "sync", "state_sync: received {:?} from peer {}, but requested it from peer {}", key, peer_id, request.peer_id);
+            tracing::warn!(target: "sync", "state_sync: received {:?} from peer {}, but requested it from peer {}", key, peer_id, request.peer_id);
             return Err(near_chain::Error::Other(
                 "Unexpected state response (wrong sender)".to_owned(),
             ));
         }
+
+        tracing::debug!(target: "sync", "state_sync: success received {:?} from peer {}", key, peer_id, request.peer_id);
 
         let value = self.pending_requests.remove(&key).unwrap();
         let _ = value.sender.send(data);

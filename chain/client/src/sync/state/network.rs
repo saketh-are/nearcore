@@ -89,7 +89,7 @@ impl StateSyncDownloadSourcePeerSharedState {
             ));
         }
 
-        tracing::debug!(target: "sync", "state_sync: success received {:?} from peer {}", key, peer_id, request.peer_id);
+        tracing::debug!(target: "sync", "state_sync: success received {:?} from peer {}", key, peer_id);
 
         let value = self.pending_requests.remove(&key).unwrap();
         let _ = value.sender.send(data);

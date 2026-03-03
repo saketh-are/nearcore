@@ -37,7 +37,7 @@ use near_primitives::views::{
 };
 use near_store::adapter::StoreAdapter;
 use near_store::adapter::flat_store::encode_flat_state_db_key;
-use near_store::db::GENESIS_CONGESTION_INFO_KEY;
+use near_store::db::{CLOUD_HEAD_KEY, GENESIS_CONGESTION_INFO_KEY};
 use near_store::flat::delta::KeyForFlatStateDelta;
 use near_store::flat::{FlatStateChanges, FlatStateDeltaMetadata, FlatStorageStatus};
 use near_store::trie::AccessOptions;
@@ -853,6 +853,7 @@ struct BlockMiscData {
     genesis_state_roots: Option<Vec<StateRoot>>,
     genesis_congestion_info: Option<Vec<CongestionInfo>>,
     cold_head: Option<Tip>,
+    cloud_head: Option<Tip>,
     state_sync_dump: Option<StateSyncDumpProgress>,
     state_snapshot: Option<CryptoHash>,
 }
@@ -871,9 +872,9 @@ impl BlockMiscData {
             genesis_state_roots: store.get_ser(DBCol::BlockMisc, GENESIS_STATE_ROOTS_KEY),
             genesis_congestion_info: store.get_ser(DBCol::BlockMisc, GENESIS_CONGESTION_INFO_KEY),
             cold_head: store.get_ser(DBCol::BlockMisc, COLD_HEAD_KEY),
+            cloud_head: store.get_ser(DBCol::BlockMisc, CLOUD_HEAD_KEY),
             state_sync_dump: store.get_ser(DBCol::BlockMisc, STATE_SYNC_DUMP_KEY),
             state_snapshot: store.get_ser(DBCol::BlockMisc, STATE_SNAPSHOT_KEY),
-            // TODO(cloud_archival) Add `CLOUD_HEAD_KEY`
         })
     }
 }

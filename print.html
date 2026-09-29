@@ -309,7 +309,7 @@ An ED25519 public key is 32 bytes long and maps to a 64-character account ID.</p
 <p>The account ID is derived from a Secp256K1 public key using the following formula: <code>'0x' + keccak256(public_key)[12:32].hex()</code>.</p>
 <p>Example: a public key in base58 <code>2KFsZcvNUMBfmTp5DTMmguyeQyontXZ2CirPsb21GgPG3KMhwrkRuNiFCdMyRU3R4KbopMpSMXTFQfLoMkrg4HsT</code> will map to the account ID <code>0x87b435f1fcb4519306f9b755e274107cc78ac4e3</code>.</p>
 <h3 id="implicit-account-creation"><a class="header" href="#implicit-account-creation">Implicit account creation</a></h3>
-<p>An account with implicit account ID can only be created by sending a transaction/receipt with a single <code>Transfer</code> action to the implicit account ID receiver:</p>
+<p>An account with a NEAR-implicit or ETH-implicit account ID can only be created by sending a transaction/receipt with a single <code>Transfer</code> action to the implicit account ID receiver (<a href="DataStructures/Account.html#deterministic-account-creation">deterministic accounts</a> have their own rules):</p>
 <ul>
 <li>The account will be created with the account ID.</li>
 <li>The account balance will have a transfer balance deposited to it.</li>
@@ -1884,7 +1884,7 @@ is defined by <code>EpochInfo</code> for <code>T+1</code> and the information ag
 <li><code>validators</code>: the list of validators selected for epoch <code>T+2</code></li>
 <li><code>validator_to_index</code>: Mapping from account id to index in <code>validators</code></li>
 <li><code>block_producers_settlement</code>: defines the mapping from height to block producer</li>
-<li><code>chunk_producers_settlement</code>: defines the mapping from height and shard id to chunk producer</li>
+<li><code>chunk_producers_settlement</code>: defines the base mapping from height and shard id to chunk producer. From protocol version 87 on, this mapping can be overridden within the epoch, see <a href="ChainSpec/EpochAndStaking/EpochManager.html#early-chunk-producer-reassignment">Early chunk producer reassignment</a></li>
 <li><code>hidden_validators_settlement</code>: TODO</li>
 <li><code>fishermen</code>, <code>fishermen_to_index</code>: TODO. disabled on mainnet through a large <code>fishermen_threshold</code> in config</li>
 <li><code>stake_change</code>: TODO</li>
@@ -1963,6 +1963,30 @@ then its reward for epoch <code>T</code> is automatically added to the proposal.
 <code>chunk_producers_settlement</code>sets. This algorithm is described in <a href="ChainSpec/EpochAndStaking/../../Economics/Economics.html#validator-selection">Economics</a>.</p>
 <h3 id="validator-reward"><a class="header" href="#validator-reward">Validator reward</a></h3>
 <p>Rewards calculation is described in the <a href="ChainSpec/EpochAndStaking/../../Economics/Economics.html#validator-rewards-calculation">Economics</a> section.</p>
+<h2 id="early-chunk-producer-reassignment"><a class="header" href="#early-chunk-producer-reassignment">Early chunk producer reassignment</a></h2>
+<p>The <a href="ChainSpec/EpochAndStaking/EpochManager.html#kickout-set">kickout set</a> only takes effect at an epoch boundary, so a chunk producer that
+stops producing keeps its slots for the rest of the epoch. From protocol version 87 on, the
+protocol also reassigns chunk producer slots <em>within</em> an epoch.</p>
+<p>A chunk producer is excluded on a shard when both hold for its stats in the current epoch:</p>
+<ul>
+<li>it missed at least 100 chunks on that shard, and</li>
+<li>its produced-to-expected ratio on that shard is below 80%.</li>
+</ul>
+<p>Exclusion is per shard, and stats never cross an epoch boundary. A 1000-block grace window
+at the start of each epoch delays the first possible exclusion, so a producer cannot be
+excluded before roughly block 1000 of an epoch. A safety valve keeps the least-bad producer
+eligible when the rule would exclude every distinct producer on a shard, so a shard can never
+run out of chunk producers.</p>
+<p>The chunk producer for the chunks anchored at a block is sampled with the excluded producers
+removed, and the result is persisted in <code>DBCol::ChunkProducers</code> keyed by
+<code>(anchor_block_hash, shard_id)</code>. The anchor is the chunk's grandparent block, so a chunk at
+height <code>h</code> reads the row written for the block at height <code>h - 2</code>. Chunk validation reads that
+row verbatim rather than re-sampling, which is what makes the assignment identical on every
+node: the exclusion set is derived from the anchor's last-final block, which is
+header-derived and therefore the same everywhere for a canonical anchor.</p>
+<p>Within the first two blocks of an epoch the anchor belongs to the previous epoch. The
+exclusion set is provably empty there, because stats do not cross the boundary, so those
+chunks fall back to the plain settlement sampler.</p>
 <div style="break-before: page; page-break-before: always;"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
 <h1 id="staking-and-slashing"><a class="header" href="#staking-and-slashing">Staking and slashing</a></h1>
 <h2 id="stake-invariant"><a class="header" href="#stake-invariant">Stake invariant</a></h2>
@@ -6566,11 +6590,14 @@ chain to runtime, a list of <code>SignedTransaction</code> and a list of <code>R
 returns an <code>ApplyResult</code>, which includes state changes, execution outcomes, etc.</p>
 <p><strong>Architecture Invariant:</strong> The state update is only finalized at the end of
 <code>apply</code>. During all intermediate steps state changes can be reverted.</p>
-<h3 id="runtimenear-vm-logic"><a class="header" href="#runtimenear-vm-logic"><code>runtime/near-vm-logic</code></a></h3>
-<p><code>VMLogic</code> contains all the implementations of host functions and is the
-interface between runtime and wasm. <code>VMLogic</code> is constructed when runtime
-applies function call actions. In <code>VMLogic</code>, interaction with NEAR blockchain
-happens in the following two ways:</p>
+<h3 id="runtimenear-vm-runnersrclogic"><a class="header" href="#runtimenear-vm-runnersrclogic"><code>runtime/near-vm-runner/src/logic</code></a></h3>
+<p>This module holds the VM-independent half of the host side of the contract
+boundary: the <code>VMContext</code> and <code>External</code> interfaces described below, gas
+counting, registers, the promise DAG and the <code>ExecutionResultState</code> that is
+turned into a <code>VMOutcome</code> when a function call finishes. The host functions
+themselves live in <code>runtime/near-vm-runner/src/wasmtime_runner/logic.rs</code>
+and operate directly on the wasmtime <code>Ctx</code> and guest memory. Interaction
+with the NEAR blockchain happens in the following two ways:</p>
 <ul>
 <li><code>VMContext</code>, which contains lightweight information such as current block
 hash, current block height, epoch id, etc.</li>
@@ -6581,7 +6608,7 @@ blockchain.</li>
 <h3 id="runtimenear-vm-runner"><a class="header" href="#runtimenear-vm-runner"><code>runtime/near-vm-runner</code></a></h3>
 <p><code>run</code> function in <code>runner.rs</code> is the entry point to the vm runner. This function essentially spins
 up the vm and executes some function in a contract. Contracts are compiled and run with wasmtime.
-The <code>imports</code> module exposes host functions defined in <code>near-vm-logic</code> to WASM code. In other
+The <code>imports</code> module exposes the host functions defined in <code>wasmtime_runner/logic.rs</code> to WASM code. In other
 words, it defines the ABI of the contracts on NEAR.</p>
 <h3 id="neard"><a class="header" href="#neard"><code>neard</code></a></h3>
 <p>As mentioned before, <code>neard</code> is the crate that contains that main entry points.
@@ -9911,9 +9938,8 @@ hence it affects the deploy action costs.</p>
 <p>Gas parameters are a subset of runtime parameters that are defined in
 <a href="architecture/gas/../../../core/parameters/res/runtime_configs/parameters.yaml">runtime_configs/parameters.yaml</a>.
 <strong>IMPORTANT:</strong> This is not the final list of parameters, it contains the base
-values which can be overwritten per protocol version. For example,
-<a href="architecture/gas/../../../core/parameters/res/runtime_configs/53.yaml">53.yaml</a>
-changes several parameters starting from version 53. You can see the final list
+values which can be overwritten per protocol version. File <code>V.yaml</code>
+represents parameter changes starting from version <code>V</code>. You can see the final list
 of parameters in
 <a href="architecture/gas/../../../core/parameters/res/runtime_configs/parameters.snap">runtime_configs/parameters.snap</a>.
 This file is automatically updated whenever any of the parameters changes. To
